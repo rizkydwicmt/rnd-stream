@@ -113,7 +113,7 @@ jobs:
         env:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
-          CGO_ENABLED: 0
+          CGO_ENABLED: 1
         run: |
           VERSION=${{ needs.create-release.outputs.version }}
           BINARY_NAME=stream-${GOOS}-${GOARCH}
