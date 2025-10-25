@@ -14,10 +14,6 @@ updates:
       time: "02:00"
       timezone: "UTC"
     open-pull-requests-limit: 10
-    reviewers:
-      - "your-username"  # Replace with actual username
-    assignees:
-      - "your-username"  # Replace with actual username
     labels:
       - "dependencies"
       - "go"
@@ -52,10 +48,6 @@ updates:
       time: "02:00"
       timezone: "UTC"
     open-pull-requests-limit: 5
-    reviewers:
-      - "your-username"  # Replace with actual username
-    assignees:
-      - "your-username"  # Replace with actual username
     labels:
       - "dependencies"
       - "github-actions"
@@ -75,8 +67,6 @@ updates:
       time: "02:00"
       timezone: "UTC"
     open-pull-requests-limit: 3
-    reviewers:
-      - "your-username"  # Replace with actual username
     labels:
       - "dependencies"
       - "docker"

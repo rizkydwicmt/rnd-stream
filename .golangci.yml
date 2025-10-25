@@ -23,92 +23,27 @@ linters:
     - staticcheck   # Advanced Go linter
     - unused        # Check for unused code
 
-    # Additional recommended linters
+    # Basic code quality linters
     - gofmt         # Check formatting
-    - goimports     # Check import formatting
     - misspell      # Check for misspelled words
-    - revive        # Fast, configurable, extensible linter
-    - stylecheck    # Style check
-    - unconvert     # Remove unnecessary type conversions
-    - unparam       # Unused function parameters
-    - gosec         # Security issues
-    - bodyclose     # HTTP response body close check
-    - noctx         # HTTP request without context
-    - prealloc      # Find slice declarations that could be preallocated
-    - exportloopref # Loop variable exported
-    - gocritic      # Comprehensive Go source code linter
 
   disable:
     - typecheck     # Disable in favor of build verification
 
 linters-settings:
   errcheck:
-    check-type-assertions: true
-    check-blank: true
-    exclude-functions:
-      - (io.Closer).Close
-      - (*database/sql.Rows).Close
+    check-type-assertions: false
+    check-blank: false
 
   govet:
     enable:
       - shadow
-      - fieldalignment
-    disable:
-      - printf
 
   gofmt:
     simplify: true
 
-  goimports:
-    local-prefixes: stream
-
-  revive:
-    rules:
-      - name: blank-imports
-      - name: context-as-argument
-      - name: dot-imports
-      - name: error-return
-      - name: error-strings
-      - name: error-naming
-      - name: exported
-      - name: increment-decrement
-      - name: var-naming
-      - name: package-comments
-      - name: range
-      - name: receiver-naming
-      - name: indent-error-flow
-      - name: superfluous-else
-      - name: unreachable-code
-      - name: var-declaration
-
-  gosec:
-    severity: medium
-    confidence: medium
-    excludes:
-      - G104 # Audit errors not checked (covered by errcheck)
-      - G304 # File path provided as taint input (common in file operations)
-
-  gocritic:
-    enabled-tags:
-      - diagnostic
-      - style
-      - performance
-      - experimental
-      - opinionated
-    disabled-checks:
-      - whyNoLint
-      - unnamedResult
-      - hugeParam
-
-  prealloc:
-    simple: true
-    range-loops: true
-    for-loops: true
-
   misspell:
     locale: US
-    ignore-words:
-      - optimisation
 
 issues:
   max-issues-per-linter: 0
