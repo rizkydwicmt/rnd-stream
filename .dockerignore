@@ -1,0 +1,65 @@
+# Git
+.git
+.gitignore
+.gitattributes
+
+# CI/CD
+.github
+.gitlab-ci.yml
+.travis.yml
+
+# IDE
+.idea
+.vscode
+*.swp
+*.swo
+*~
+
+# Documentation
+*.md
+!README.md
+!LICENSE
+docs/
+
+# Build artifacts
+bin/
+dist/
+*.exe
+*.dll
+*.so
+*.dylib
+stream
+
+# Test files
+*_test.go
+test/
+tests/
+testdata/
+coverage.*
+*.out
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Dependencies (will be downloaded in build)
+vendor/
+
+# Documentation generation
+BENCHMARK_RESULTS.md
+COMPLETE_IMPLEMENTATION_SUMMARY.md
+DECRYPT_OPERATORS_SUMMARY.md
+IMPLEMENTATION_SUMMARY.md
+INTEGRATION_GUIDE.md
+JSON_ARRAY_FORMAT.md
+NEW_OPERATORS_SUMMARY.md
+OPERATORS_IMPLEMENTATION.md
+QUICK_START.md
+ROUND_3_OPERATORS_SUMMARY.md
+BUFFERING_OPTIMIZATION.md
