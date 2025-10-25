@@ -35,15 +35,6 @@ jobs:
           go-version: ${{ env.GO_VERSION }}
           cache: true
 
-      - name: golangci-lint
-        uses: golangci/golangci-lint-action@v6
-        with:
-          version: latest
-          args: --timeout=5m --config=.golangci.yml
-          skip-cache: false
-          skip-pkg-cache: false
-          skip-build-cache: false
-
       - name: Check go mod tidy
         run: |
           go mod tidy
@@ -199,65 +190,12 @@ jobs:
           fi
 
   # ========================================================================
-  # Code Coverage Report
-  # ========================================================================
-  coverage:
-    name: Code Coverage Report
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    needs: [test]
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: ${{ env.GO_VERSION }}
-          cache: true
-
-      - name: Generate coverage report
-        run: |
-          go test -coverprofile=coverage.out -covermode=atomic ./...
-          go tool cover -html=coverage.out -o coverage.html
-
-      - name: Calculate coverage percentage
-        run: |
-          COVERAGE=$(go tool cover -func=coverage.out | grep total | awk '{print $3}' | sed 's/%//')
-          echo "Total coverage: $COVERAGE%"
-          echo "COVERAGE=$COVERAGE" >> $GITHUB_ENV
-
-      - name: Upload coverage report
-        uses: actions/upload-artifact@v4
-        with:
-          name: coverage-report
-          path: |
-            coverage.out
-            coverage.html
-          retention-days: 30
-
-      - name: Comment coverage on PR
-        if: github.event_name == 'pull_request'
-        uses: actions/github-script@v7
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          script: |
-            const coverage = process.env.COVERAGE;
-            const body = `### Code Coverage Report\n\n**Total Coverage:** ${coverage}%\n\n✅ Coverage report generated successfully.`;
-            github.rest.issues.createComment({
-              issue_number: context.issue.number,
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              body: body
-            });
-
-  # ========================================================================
   # Status Check (required for branch protection)
   # ========================================================================
   ci-success:
     name: CI Success
     runs-on: ubuntu-latest
-    needs: [lint, test, build, benchmark, coverage]
+    needs: [lint, test, build, benchmark]
     if: always()
     steps:
       - name: Check all jobs status

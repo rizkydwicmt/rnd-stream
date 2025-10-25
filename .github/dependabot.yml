@@ -30,12 +30,6 @@ updates:
         update-types:
           - "minor"
           - "patch"
-    # Ignore specific dependencies if needed
-    ignore:
-      # Example: ignore major version updates for stable dependencies
-      # - dependency-name: "github.com/gin-gonic/gin"
-      #   update-types: ["version-update:semver-major"]
-    versioning-strategy: increase
 
   # ========================================================================
   # GitHub Actions
