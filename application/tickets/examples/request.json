@@ -1,0 +1,33 @@
+{
+  "tableName": "tickets",
+  "orderBy": ["id", "asc"],
+  "limit": 10,
+  "offset": 0,
+  "where": [
+    {
+      "field": "status",
+      "op": "=",
+      "value": "open"
+    }
+  ],
+  "formulas": [
+    {
+      "params": ["id"],
+      "field": "ticket_id",
+      "operator": "",
+      "position": 1
+    },
+    {
+      "params": ["id", "created_at"],
+      "field": "masked_id",
+      "operator": "ticketIdMasking",
+      "position": 2
+    },
+    {
+      "params": ["status", "priority"],
+      "field": "status_info",
+      "operator": "concat",
+      "position": 3
+    }
+  ]
+}
