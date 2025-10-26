@@ -2,3 +2,4 @@
 /example
 stream
 .idea/
+.deploy.yaml
