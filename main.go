@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"os"
 	"stream/application/health"
 	"stream/application/tickets"
 	"stream/common"
@@ -15,11 +16,13 @@ import (
 	"time"
 
 	"go.uber.org/zap"
+	"gorm.io/driver/mysql"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 
 	"github.com/gin-gonic/gin"
+	"github.com/joho/godotenv"
 )
 
 func main() {
@@ -30,13 +33,25 @@ func main() {
 	memLimit := int64(128 * 1024 * 1024) // 128 MB in bytes
 	debug.SetMemoryLimit(memLimit)
 
-	// Start
-	db, err := setupDatabase()
-	if err != nil {
-		log.Fatal("Failed to setup database:", err)
+	// Load .env file
+	if err := godotenv.Load(); err != nil {
+		log.Println("⚠️  No .env file found, using environment variables")
 	}
+
+	// Setup dummy database (SQLite in-memory)
+	dummyDB, err := setupDummyDatabase()
+	if err != nil {
+		log.Fatal("Failed to setup dummy database:", err)
+	}
+
+	// Setup real database (MySQL)
+	realDB, err := setupRealDatabase()
+	if err != nil {
+		log.Fatal("Failed to setup real database:", err)
+	}
+
 	z := NewLogger()
-	r := SetupRouter(db)
+	r := SetupRouter(dummyDB, realDB)
 
 	srv := &http.Server{
 		Addr:         ":8080",
@@ -100,26 +115,74 @@ func NewLogger() *zap.Logger {
 	return zapLogger
 }
 
-func setupDatabase() (*gorm.DB, error) {
+func setupDummyDatabase() (*gorm.DB, error) {
+	log.Println("📦 Setting up dummy database (SQLite in-memory)...")
 	// Open SQLite in-memory database for demo
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{
 		Logger: logger.Default.LogMode(logger.Silent),
 	})
 	if err != nil {
-		return nil, fmt.Errorf("failed to connect database: %w", err)
+		return nil, fmt.Errorf("failed to connect dummy database: %w", err)
 	}
 
 	// Auto-migrate
 	if err := db.AutoMigrate(&common.Ticket{}); err != nil {
-		return nil, fmt.Errorf("failed to migrate: %w", err)
+		return nil, fmt.Errorf("failed to migrate dummy database: %w", err)
 	}
 
 	// Seed data (100,000 tickets for realistic demo)
-	log.Println("🌱 Seeding database with 100,000 tickets...")
+	log.Println("🌱 Seeding dummy database with 100,000 tickets...")
 	if err := seedData(db); err != nil {
-		return nil, fmt.Errorf("failed to seed data: %w", err)
+		return nil, fmt.Errorf("failed to seed dummy data: %w", err)
 	}
-	log.Println("✅ Database seeded successfully")
+	log.Println("✅ Dummy database seeded successfully")
+
+	return db, nil
+}
+
+func setupRealDatabase() (*gorm.DB, error) {
+	log.Println("🗄️  Setting up real database (MySQL)...")
+
+	// Get environment variables
+	host := os.Getenv("REAL_DB_HOST")
+	port := os.Getenv("REAL_DB_PORT")
+	user := os.Getenv("REAL_DB_USER")
+	pass := os.Getenv("REAL_DB_PASS")
+	dbname := os.Getenv("REAL_DB_NAME")
+
+	// Validate required environment variables
+	if host == "" || port == "" || user == "" || pass == "" || dbname == "" {
+		return nil, fmt.Errorf("missing required real database environment variables")
+	}
+
+	// Build MySQL DSN
+	dsn := fmt.Sprintf("%s:%s@tcp(%s:%s)/%s?charset=utf8mb4&parseTime=True&loc=Local",
+		user, pass, host, port, dbname)
+
+	// Open MySQL database connection
+	db, err := gorm.Open(mysql.Open(dsn), &gorm.Config{
+		Logger: logger.Default.LogMode(logger.Silent),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to connect real database: %w", err)
+	}
+
+	// Test connection
+	sqlDB, err := db.DB()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get database instance: %w", err)
+	}
+
+	if err := sqlDB.Ping(); err != nil {
+		return nil, fmt.Errorf("failed to ping real database: %w", err)
+	}
+
+	// Configure connection pool
+	sqlDB.SetMaxIdleConns(10)
+	sqlDB.SetMaxOpenConns(100)
+	sqlDB.SetConnMaxLifetime(time.Hour)
+
+	log.Println("✅ Real database connected successfully")
 
 	return db, nil
 }
@@ -157,26 +220,40 @@ func seedData(db *gorm.DB) error {
 	return nil
 }
 
-func SetupRouter(db *gorm.DB) *gin.Engine {
+func SetupRouter(dummyDB *gorm.DB, realDB *gorm.DB) *gin.Engine {
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.New()
 	r.Use(gin.Recovery())
 	r.Use(middleware.RequestInit())
 	r.Use(middleware.ResponseInit())
 
-	// Health endpoint
-	healthRepo := health.NewRepository(db)
-	healthSvc := health.NewService(healthRepo)
+	// Health endpoint (monitors both databases)
+	dummyHealthRepo := health.NewRepository(dummyDB)
+	realHealthRepo := health.NewRepository(realDB)
+	healthSvc := health.NewService(dummyHealthRepo, realHealthRepo)
 	healthHandler := health.NewHandler(healthSvc)
 
-	// Tickets streaming endpoint
-	ticketsRepo := tickets.NewRepository(db)
-	ticketsSvc := tickets.NewService(ticketsRepo)
-	ticketsHandler := tickets.NewHandler(ticketsSvc)
+	// Dummy database tickets streaming endpoint
+	dummyTicketsRepo := tickets.NewRepository(dummyDB)
+	dummyTicketsSvc := tickets.NewService(dummyTicketsRepo)
+	dummyTicketsHandler := tickets.NewHandler(dummyTicketsSvc)
 
+	// Real database tickets streaming endpoint
+	realTicketsRepo := tickets.NewRepository(realDB)
+	realTicketsSvc := tickets.NewService(realTicketsRepo)
+	realTicketsHandler := tickets.NewHandler(realTicketsSvc)
+
+	// Register routes
 	api := r.Group("")
 	healthHandler.RegisterRoutes(api)
-	ticketsHandler.RegisterRoutes(api)
+
+	// Register dummy database routes under /v1/tickets
+	dummyGroup := api.Group("/v1/tickets")
+	dummyTicketsHandler.RegisterRoutesWithPrefix(dummyGroup)
+
+	// Register real database routes under /v1/tickets-real
+	realGroup := api.Group("/v1/tickets-real")
+	realTicketsHandler.RegisterRoutesWithPrefix(realGroup)
 
 	return r
 }

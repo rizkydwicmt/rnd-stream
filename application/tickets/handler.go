@@ -26,6 +26,12 @@ func (h *Handler) RegisterRoutes(api *gin.RouterGroup) {
 	}
 }
 
+// RegisterRoutesWithPrefix registers the handler routes with a custom prefix
+// This is used to create separate endpoints for different databases
+func (h *Handler) RegisterRoutesWithPrefix(group *gin.RouterGroup) {
+	group.POST("/stream", h.StreamTickets)
+}
+
 // StreamTickets handles the POST /v1/tickets/stream endpoint
 func (h *Handler) StreamTickets(c *gin.Context) {
 	sendStream := c.MustGet("sendStream").(func(middleware.StreamResponse))

@@ -6,35 +6,63 @@ import (
 )
 
 type Service struct {
-	repo *Repository
+	dummyRepo *Repository
+	realRepo  *Repository
 }
 
-func NewService(repo *Repository) *Service {
-	return &Service{repo: repo}
+func NewService(dummyRepo *Repository, realRepo *Repository) *Service {
+	return &Service{
+		dummyRepo: dummyRepo,
+		realRepo:  realRepo,
+	}
 }
 
 func (s *Service) CheckHealth() (map[string]string, error) {
-	err := s.repo.Ping()
+	result := make(map[string]string)
+
+	// Check dummy database
+	err := s.dummyRepo.Ping()
 	if err != nil {
-		return nil, err
+		result["dummy_database"] = "error"
+	} else {
+		result["dummy_database"] = "ok"
 	}
-	return map[string]string{"database": "ok"}, nil
+
+	// Check real database
+	err = s.realRepo.Ping()
+	if err != nil {
+		result["real_database"] = "error"
+	} else {
+		result["real_database"] = "ok"
+	}
+
+	return result, nil
 }
 
 func (s *Service) CheckHealthStream() <-chan middleware.StreamChunk {
 	chunkChan := make(chan middleware.StreamChunk, 2)
 	go func() {
 		defer close(chunkChan)
-		err := s.repo.Ping()
+
+		result := make(map[string]string)
+
+		// Check dummy database
+		err := s.dummyRepo.Ping()
 		if err != nil {
-			jsonData, _ := json.Marshal(map[string]string{"database": "error"})
-			chunkChan <- middleware.StreamChunk{
-				JSONBuf: &jsonData,
-				Error:   err,
-			}
-			return
+			result["dummy_database"] = "error"
+		} else {
+			result["dummy_database"] = "ok"
 		}
-		jsonData, _ := json.Marshal(map[string]string{"database": "ok"})
+
+		// Check real database
+		err = s.realRepo.Ping()
+		if err != nil {
+			result["real_database"] = "error"
+		} else {
+			result["real_database"] = "ok"
+		}
+
+		jsonData, _ := json.Marshal(result)
 		chunkChan <- middleware.StreamChunk{
 			JSONBuf: &jsonData,
 			Error:   nil,

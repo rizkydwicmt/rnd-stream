@@ -9,6 +9,13 @@ stringData:
   APP_PORT: "8080"
   APP_TYPE: "service"
 
+  # Real Database Configuration (MySQL)
+  REAL_DB_HOST: "35.219.51.240"
+  REAL_DB_PORT: "3306"
+  REAL_DB_USER: "omnix"
+  REAL_DB_PASS: "fyVA3BcTOFENZydZ"
+  REAL_DB_NAME: "r_onx_dev"
+
 ---
 
 apiVersion: apps/v1
@@ -46,7 +53,7 @@ spec:
                 name: env-rnd-stream-secret
           env:
             - name: RANDOM_KEY
-              value: "thisisavery1"
+              value: "thisisavery2"
           livenessProbe:
             httpGet:
               path: /health

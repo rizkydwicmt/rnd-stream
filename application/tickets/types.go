@@ -142,7 +142,8 @@ func (sv *ScanValue) Scan(src interface{}) error {
 
 // AllowedTables is a whitelist of allowed table names (security)
 var AllowedTables = map[string]bool{
-	"tickets": true,
+	"tickets":       true,
+	"report_ticket": true,
 }
 
 // AllowedOperators is a whitelist of allowed WHERE operators
