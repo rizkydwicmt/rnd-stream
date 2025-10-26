@@ -7,6 +7,10 @@ import (
 
 // ValidatePayload validates the incoming query payload
 func ValidatePayload(payload *QueryPayload) error {
+	// Normalize formulas before validation
+	// This auto-fills Field with Operator value when Field is empty
+	normalizeFormulas(payload.Formulas)
+
 	// Validate table name against whitelist
 	if !AllowedTables[payload.TableName] {
 		return fmt.Errorf("table '%s' is not allowed", payload.TableName)
@@ -55,6 +59,18 @@ func ValidatePayload(payload *QueryPayload) error {
 	}
 
 	return nil
+}
+
+// normalizeFormulas normalizes formulas by auto-filling empty Field with Operator value
+// This allows users to omit Field when it should be the same as Operator
+// Modifies formulas in-place for efficiency
+func normalizeFormulas(formulas []Formula) {
+	for i := range formulas {
+		// If Field is empty but Operator has a value, set Field = Operator
+		if formulas[i].Field == "" && formulas[i].Operator != "" {
+			formulas[i].Field = formulas[i].Operator
+		}
+	}
 }
 
 // validateOrderBy validates the orderBy array

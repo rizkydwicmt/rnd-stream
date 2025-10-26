@@ -463,9 +463,7 @@ func contacts(params []interface{}) (interface{}, error) {
 	}
 
 	// Return structured result
-	return map[string]interface{}{
-		"contacts": contactData,
-	}, nil
+	return contactData, nil
 }
 
 // ticketDate processes ticket status dates and formats them for display.
@@ -589,9 +587,7 @@ func ticketDate(params []interface{}) (interface{}, error) {
 		}
 	}
 
-	return map[string]interface{}{
-		"status_dates": statusDateData,
-	}, nil
+	return statusDateData, nil
 }
 
 // additionalData processes additional data fields by parsing JSON and structuring the output.

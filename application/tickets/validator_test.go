@@ -127,6 +127,54 @@ func TestValidatePayload(t *testing.T) {
 			},
 			wantError: true,
 		},
+		{
+			name: "auto-fill Field from Operator when Field is empty",
+			payload: &QueryPayload{
+				TableName: "tickets",
+				Limit:     &limit100,
+				Formulas: []Formula{
+					{
+						Params:   []string{"ticket_id"},
+						Field:    "", // Empty field
+						Operator: "ticketIdMasking",
+						Position: 1,
+					},
+				},
+			},
+			wantError: false, // Should pass: Field will be auto-filled with Operator
+		},
+		{
+			name: "empty Field and empty Operator should fail",
+			payload: &QueryPayload{
+				TableName: "tickets",
+				Limit:     &limit100,
+				Formulas: []Formula{
+					{
+						Params:   []string{"ticket_id"},
+						Field:    "", // Empty field
+						Operator: "", // Empty operator (pass-through)
+						Position: 1,
+					},
+				},
+			},
+			wantError: true, // Should fail: both Field and Operator are empty
+		},
+		{
+			name: "explicit Field takes precedence over Operator",
+			payload: &QueryPayload{
+				TableName: "tickets",
+				Limit:     &limit100,
+				Formulas: []Formula{
+					{
+						Params:   []string{"ticket_id"},
+						Field:    "custom_field_name",
+						Operator: "ticketIdMasking",
+						Position: 1,
+					},
+				},
+			},
+			wantError: false, // Should pass: explicit Field is preserved
+		},
 	}
 
 	for _, tt := range tests {
@@ -134,6 +182,138 @@ func TestValidatePayload(t *testing.T) {
 			err := ValidatePayload(tt.payload)
 			if (err != nil) != tt.wantError {
 				t.Errorf("ValidatePayload() error = %v, wantError %v", err, tt.wantError)
+			}
+		})
+	}
+}
+
+func TestNormalizeFormulas(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    []Formula
+		expected []Formula
+	}{
+		{
+			name: "auto-fill empty Field with Operator",
+			input: []Formula{
+				{
+					Params:   []string{"ticket_id"},
+					Field:    "",
+					Operator: "ticketIdMasking",
+					Position: 1,
+				},
+			},
+			expected: []Formula{
+				{
+					Params:   []string{"ticket_id"},
+					Field:    "ticketIdMasking", // Should be filled
+					Operator: "ticketIdMasking",
+					Position: 1,
+				},
+			},
+		},
+		{
+			name: "preserve explicit Field value",
+			input: []Formula{
+				{
+					Params:   []string{"ticket_id"},
+					Field:    "custom_name",
+					Operator: "ticketIdMasking",
+					Position: 1,
+				},
+			},
+			expected: []Formula{
+				{
+					Params:   []string{"ticket_id"},
+					Field:    "custom_name", // Should remain unchanged
+					Operator: "ticketIdMasking",
+					Position: 1,
+				},
+			},
+		},
+		{
+			name: "leave empty when both Field and Operator are empty",
+			input: []Formula{
+				{
+					Params:   []string{"ticket_id"},
+					Field:    "",
+					Operator: "",
+					Position: 1,
+				},
+			},
+			expected: []Formula{
+				{
+					Params:   []string{"ticket_id"},
+					Field:    "", // Should remain empty
+					Operator: "",
+					Position: 1,
+				},
+			},
+		},
+		{
+			name: "mixed scenarios",
+			input: []Formula{
+				{
+					Params:   []string{"field1"},
+					Field:    "",
+					Operator: "upper",
+					Position: 1,
+				},
+				{
+					Params:   []string{"field2"},
+					Field:    "explicit",
+					Operator: "lower",
+					Position: 2,
+				},
+				{
+					Params:   []string{"field3"},
+					Field:    "",
+					Operator: "",
+					Position: 3,
+				},
+			},
+			expected: []Formula{
+				{
+					Params:   []string{"field1"},
+					Field:    "upper", // Auto-filled
+					Operator: "upper",
+					Position: 1,
+				},
+				{
+					Params:   []string{"field2"},
+					Field:    "explicit", // Preserved
+					Operator: "lower",
+					Position: 2,
+				},
+				{
+					Params:   []string{"field3"},
+					Field:    "", // Remains empty
+					Operator: "",
+					Position: 3,
+				},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Make a copy to avoid modifying the original
+			formulas := make([]Formula, len(tt.input))
+			copy(formulas, tt.input)
+
+			// Apply normalization
+			normalizeFormulas(formulas)
+
+			// Verify results
+			for i := range formulas {
+				if formulas[i].Field != tt.expected[i].Field {
+					t.Errorf("Formula[%d].Field = %q, want %q",
+						i, formulas[i].Field, tt.expected[i].Field)
+				}
+				if formulas[i].Operator != tt.expected[i].Operator {
+					t.Errorf("Formula[%d].Operator = %q, want %q",
+						i, formulas[i].Operator, tt.expected[i].Operator)
+				}
 			}
 		})
 	}

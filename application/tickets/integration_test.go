@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	json "github.com/json-iterator/go"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
@@ -1240,6 +1241,203 @@ func TestIntegration_DisableCountWithEmptyFormulas(t *testing.T) {
 			t.Errorf("Expected field '%s' in response", field)
 		}
 	}
+}
+
+// TestIntegration_AutoFillFieldFromOperator tests the auto-fill Field feature
+func TestIntegration_AutoFillFieldFromOperator(t *testing.T) {
+	db := setupTestDB(t)
+
+	repo := NewRepository(db)
+	svc := NewService(repo)
+
+	t.Run("auto-fill Field from Operator when Field is empty", func(t *testing.T) {
+		limit := 1
+		payload := &QueryPayload{
+			TableName: "tickets",
+			Limit:     &limit,
+			Formulas: []Formula{
+				{
+					Params:   []string{"status"},
+					Field:    "", // Empty - should be auto-filled with Operator
+					Operator: "upper",
+					Position: 1,
+				},
+			},
+		}
+
+		ctx := context.Background()
+		result := svc.StreamTickets(ctx, payload)
+
+		if result.Code != 200 {
+			t.Fatalf("Expected code 200, got %d. Error: %v", result.Code, result.Error)
+		}
+
+		// Read chunks
+		var jsonData []byte
+		for chunk := range result.ChunkChan {
+			if chunk.Error != nil {
+				t.Fatalf("Chunk error: %v", chunk.Error)
+			}
+			if chunk.JSONBuf != nil {
+				jsonData = append(jsonData, *chunk.JSONBuf...)
+			}
+		}
+
+		// Parse JSON
+		var rows []map[string]interface{}
+		if err := json.Unmarshal(jsonData, &rows); err != nil {
+			t.Fatalf("Failed to parse JSON: %v. JSON: %s", err, string(jsonData))
+		}
+
+		if len(rows) != 1 {
+			t.Fatalf("Expected 1 row, got %d", len(rows))
+		}
+
+		// Verify field name is "upper" (auto-filled from Operator)
+		if _, exists := rows[0]["upper"]; !exists {
+			t.Errorf("Expected field 'upper' in response, got: %v", rows[0])
+		}
+
+		// Verify value is uppercase
+		if value, ok := rows[0]["upper"].(string); ok {
+			if value != "OPEN" {
+				t.Errorf("Expected 'OPEN', got '%s'", value)
+			}
+		} else {
+			t.Errorf("Expected string value, got %T", rows[0]["upper"])
+		}
+	})
+
+	t.Run("explicit Field takes precedence over Operator", func(t *testing.T) {
+		limit := 1
+		payload := &QueryPayload{
+			TableName: "tickets",
+			Limit:     &limit,
+			Formulas: []Formula{
+				{
+					Params:   []string{"status"},
+					Field:    "custom_status", // Explicit field name
+					Operator: "upper",
+					Position: 1,
+				},
+			},
+		}
+
+		ctx := context.Background()
+		result := svc.StreamTickets(ctx, payload)
+
+		if result.Code != 200 {
+			t.Fatalf("Expected code 200, got %d. Error: %v", result.Code, result.Error)
+		}
+
+		// Read chunks
+		var jsonData []byte
+		for chunk := range result.ChunkChan {
+			if chunk.Error != nil {
+				t.Fatalf("Chunk error: %v", chunk.Error)
+			}
+			if chunk.JSONBuf != nil {
+				jsonData = append(jsonData, *chunk.JSONBuf...)
+			}
+		}
+
+		// Parse JSON
+		var rows []map[string]interface{}
+		if err := json.Unmarshal(jsonData, &rows); err != nil {
+			t.Fatalf("Failed to parse JSON: %v", err)
+		}
+
+		if len(rows) != 1 {
+			t.Fatalf("Expected 1 row, got %d", len(rows))
+		}
+
+		// Verify field name is "custom_status" (explicit Field, not Operator)
+		if _, exists := rows[0]["custom_status"]; !exists {
+			t.Errorf("Expected field 'custom_status' in response, got: %v", rows[0])
+		}
+
+		// Should NOT have field named "upper"
+		if _, exists := rows[0]["upper"]; exists {
+			t.Errorf("Should not have field 'upper' when explicit Field is provided")
+		}
+	})
+
+	t.Run("multiple formulas with mixed Field scenarios", func(t *testing.T) {
+		limit := 1
+		payload := &QueryPayload{
+			TableName: "tickets",
+			Limit:     &limit,
+			Formulas: []Formula{
+				{
+					Params:   []string{"status"},
+					Field:    "", // Auto-fill with "upper"
+					Operator: "upper",
+					Position: 1,
+				},
+				{
+					Params:   []string{"priority"},
+					Field:    "prio", // Explicit
+					Operator: "lower",
+					Position: 2,
+				},
+				{
+					Params:   []string{"id"},
+					Field:    "ticket_id", // Explicit field with pass-through
+					Operator: "",
+					Position: 3,
+				},
+			},
+		}
+
+		ctx := context.Background()
+		result := svc.StreamTickets(ctx, payload)
+
+		if result.Code != 200 {
+			t.Fatalf("Expected code 200, got %d. Error: %v", result.Code, result.Error)
+		}
+
+		// Read chunks
+		var jsonData []byte
+		for chunk := range result.ChunkChan {
+			if chunk.Error != nil {
+				t.Fatalf("Chunk error: %v", chunk.Error)
+			}
+			if chunk.JSONBuf != nil {
+				jsonData = append(jsonData, *chunk.JSONBuf...)
+			}
+		}
+
+		// Parse JSON
+		var rows []map[string]interface{}
+		if err := json.Unmarshal(jsonData, &rows); err != nil {
+			t.Fatalf("Failed to parse JSON: %v", err)
+		}
+
+		if len(rows) != 1 {
+			t.Fatalf("Expected 1 row, got %d", len(rows))
+		}
+
+		// Verify all fields
+		expectedFields := []string{"upper", "prio", "ticket_id"}
+		for _, field := range expectedFields {
+			if _, exists := rows[0][field]; !exists {
+				t.Errorf("Expected field '%s' in response, got: %v", field, rows[0])
+			}
+		}
+
+		// Verify values
+		if value, ok := rows[0]["upper"].(string); ok {
+			if value != "OPEN" {
+				t.Errorf("Expected 'OPEN', got '%s'", value)
+			}
+		}
+
+		if value, ok := rows[0]["prio"].(string); ok {
+			if value != "high" {
+				t.Errorf("Expected 'high', got '%s'", value)
+			}
+		}
+	})
 }
 
 func BenchmarkStreamTickets(b *testing.B) {
