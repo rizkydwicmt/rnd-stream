@@ -223,7 +223,7 @@ func (s *Service) streamProcessing(
 // jsonBufferPool is a sync.Pool for JSON encoding buffers
 var jsonBufferPool = sync.Pool{
 	New: func() interface{} {
-		buf := make([]byte, 0, 4096) // 4KB initial capacity
+		buf := make([]byte, 0, 50*1024) // 50KB initial capacity
 		return &buf
 	},
 }
