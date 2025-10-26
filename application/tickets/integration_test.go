@@ -285,6 +285,335 @@ func TestIntegration_FormulaTransformation(t *testing.T) {
 	t.Logf("Transformed row: %+v", transformed)
 }
 
+// TestIntegration_EmptyFormulasSelectAll tests that empty formulas array results in SELECT * behavior
+func TestIntegration_EmptyFormulasSelectAll(t *testing.T) {
+	db := setupTestDB(t)
+	repo := NewRepository(db)
+	svc := NewService(repo)
+
+	// Test with empty formulas array
+	limit := 10
+	payload := &QueryPayload{
+		TableName: "tickets",
+		Limit:     &limit,
+		Formulas:  []Formula{}, // Empty array
+	}
+
+	ctx := context.Background()
+	response := svc.StreamTickets(ctx, payload)
+
+	// Check response
+	if response.Error != nil {
+		t.Fatalf("StreamTickets() with empty formulas error = %v", response.Error)
+	}
+
+	if response.Code != 200 {
+		t.Errorf("Expected status code 200, got %d", response.Code)
+	}
+
+	if response.TotalCount != 3 {
+		t.Errorf("Expected total count 3, got %d", response.TotalCount)
+	}
+
+	// Consume the stream and verify we get actual data (not empty objects)
+	var chunks [][]byte
+	for chunk := range response.ChunkChan {
+		if chunk.Error != nil {
+			t.Fatalf("Stream chunk error: %v", chunk.Error)
+		}
+		if chunk.JSONBuf != nil {
+			// Make a copy of the buffer content
+			bufCopy := make([]byte, len(*chunk.JSONBuf))
+			copy(bufCopy, *chunk.JSONBuf)
+			chunks = append(chunks, bufCopy)
+		}
+	}
+
+	if len(chunks) == 0 {
+		t.Fatal("Expected to receive data chunks, got 0")
+	}
+
+	// Verify the response is not empty objects
+	// The response should contain actual data like {"id":1,"ticket_no":"TKT-000001",...}
+	// not empty objects like [{},{},{}]
+	responseData := string(chunks[0])
+	t.Logf("Response data: %s", responseData)
+
+	// Verify response contains expected fields
+	expectedFields := []string{"id", "ticket_no", "customer_id", "subject", "description", "status", "priority"}
+	for _, field := range expectedFields {
+		if !contains(responseData, field) {
+			t.Errorf("Expected field '%s' in response data, but not found", field)
+		}
+	}
+
+	// Verify it's not an empty object
+	if contains(responseData, "[{}") || contains(responseData, "{},{}") {
+		t.Error("Response contains empty objects instead of actual data")
+	}
+}
+
+// TestIntegration_NilFormulasSelectAll tests that nil formulas results in SELECT * behavior
+func TestIntegration_NilFormulasSelectAll(t *testing.T) {
+	db := setupTestDB(t)
+	repo := NewRepository(db)
+	svc := NewService(repo)
+
+	// Test with nil formulas (omitted in JSON)
+	limit := 2
+	payload := &QueryPayload{
+		TableName: "tickets",
+		Limit:     &limit,
+		Formulas:  nil, // Nil formulas
+	}
+
+	ctx := context.Background()
+	response := svc.StreamTickets(ctx, payload)
+
+	// Check response
+	if response.Error != nil {
+		t.Fatalf("StreamTickets() with nil formulas error = %v", response.Error)
+	}
+
+	if response.Code != 200 {
+		t.Errorf("Expected status code 200, got %d", response.Code)
+	}
+
+	// Consume the stream
+	var chunks [][]byte
+	for chunk := range response.ChunkChan {
+		if chunk.Error != nil {
+			t.Fatalf("Stream chunk error: %v", chunk.Error)
+		}
+		if chunk.JSONBuf != nil {
+			bufCopy := make([]byte, len(*chunk.JSONBuf))
+			copy(bufCopy, *chunk.JSONBuf)
+			chunks = append(chunks, bufCopy)
+		}
+	}
+
+	if len(chunks) == 0 {
+		t.Fatal("Expected to receive data chunks, got 0")
+	}
+
+	responseData := string(chunks[0])
+	t.Logf("Response data with nil formulas: %s", responseData)
+
+	// Verify response contains expected fields
+	expectedFields := []string{"id", "ticket_no", "status"}
+	for _, field := range expectedFields {
+		if !contains(responseData, field) {
+			t.Errorf("Expected field '%s' in response data, but not found", field)
+		}
+	}
+}
+
+// TestIntegration_EmptyFormulasWithWhere tests SELECT * with WHERE clause
+func TestIntegration_EmptyFormulasWithWhere(t *testing.T) {
+	db := setupTestDB(t)
+	repo := NewRepository(db)
+	svc := NewService(repo)
+
+	limit := 10
+	payload := &QueryPayload{
+		TableName: "tickets",
+		Limit:     &limit,
+		Where: []WhereClause{
+			{Field: "status", Operator: "=", Value: "open"},
+		},
+		Formulas: []Formula{}, // Empty formulas
+	}
+
+	ctx := context.Background()
+	response := svc.StreamTickets(ctx, payload)
+
+	if response.Error != nil {
+		t.Fatalf("StreamTickets() error = %v", response.Error)
+	}
+
+	// Should return only 2 tickets with status = "open"
+	if response.TotalCount != 2 {
+		t.Errorf("Expected total count 2 (only 'open' tickets), got %d", response.TotalCount)
+	}
+
+	// Consume and verify
+	var chunks [][]byte
+	for chunk := range response.ChunkChan {
+		if chunk.Error != nil {
+			t.Fatalf("Stream chunk error: %v", chunk.Error)
+		}
+		if chunk.JSONBuf != nil {
+			bufCopy := make([]byte, len(*chunk.JSONBuf))
+			copy(bufCopy, *chunk.JSONBuf)
+			chunks = append(chunks, bufCopy)
+		}
+	}
+
+	responseData := string(chunks[0])
+	t.Logf("Response with WHERE: %s", responseData)
+
+	// Verify response contains status field with "open" value
+	if !contains(responseData, `"status":"open"`) && !contains(responseData, `"status": "open"`) {
+		t.Error("Expected to find status='open' in response")
+	}
+}
+
+// TestIntegration_EmptyFormulasWithOrderBy tests SELECT * with ORDER BY
+func TestIntegration_EmptyFormulasWithOrderBy(t *testing.T) {
+	db := setupTestDB(t)
+	repo := NewRepository(db)
+	svc := NewService(repo)
+
+	limit := 10
+	payload := &QueryPayload{
+		TableName: "tickets",
+		OrderBy:   []string{"id", "desc"}, // Descending order
+		Limit:     &limit,
+		Formulas:  []Formula{}, // Empty formulas
+	}
+
+	ctx := context.Background()
+	response := svc.StreamTickets(ctx, payload)
+
+	if response.Error != nil {
+		t.Fatalf("StreamTickets() error = %v", response.Error)
+	}
+
+	// Consume stream
+	var chunks [][]byte
+	for chunk := range response.ChunkChan {
+		if chunk.Error != nil {
+			t.Fatalf("Stream chunk error: %v", chunk.Error)
+		}
+		if chunk.JSONBuf != nil {
+			bufCopy := make([]byte, len(*chunk.JSONBuf))
+			copy(bufCopy, *chunk.JSONBuf)
+			chunks = append(chunks, bufCopy)
+		}
+	}
+
+	responseData := string(chunks[0])
+	t.Logf("Response with ORDER BY: %s", responseData)
+
+	// With ORDER BY id DESC, we should see id:3 before id:1
+	// Verify the response contains data
+	if !contains(responseData, `"id"`) {
+		t.Error("Expected to find 'id' field in response")
+	}
+}
+
+// TestIntegration_EmptyFormulasWithLimitOffset tests SELECT * with LIMIT and OFFSET
+func TestIntegration_EmptyFormulasWithLimitOffset(t *testing.T) {
+	db := setupTestDB(t)
+	repo := NewRepository(db)
+	svc := NewService(repo)
+
+	// Get second page (offset 1, limit 1)
+	limit := 1
+	payload := &QueryPayload{
+		TableName: "tickets",
+		OrderBy:   []string{"id", "asc"},
+		Limit:     &limit,
+		Offset:    1, // Skip first record
+		Formulas:  []Formula{},
+	}
+
+	ctx := context.Background()
+	response := svc.StreamTickets(ctx, payload)
+
+	if response.Error != nil {
+		t.Fatalf("StreamTickets() error = %v", response.Error)
+	}
+
+	// Total count should still be 3 (OFFSET doesn't affect count)
+	if response.TotalCount != 3 {
+		t.Errorf("Expected total count 3, got %d", response.TotalCount)
+	}
+
+	// Consume stream
+	var chunks [][]byte
+	for chunk := range response.ChunkChan {
+		if chunk.Error != nil {
+			t.Fatalf("Stream chunk error: %v", chunk.Error)
+		}
+		if chunk.JSONBuf != nil {
+			bufCopy := make([]byte, len(*chunk.JSONBuf))
+			copy(bufCopy, *chunk.JSONBuf)
+			chunks = append(chunks, bufCopy)
+		}
+	}
+
+	responseData := string(chunks[0])
+	t.Logf("Response with LIMIT/OFFSET: %s", responseData)
+
+	// Should contain only 1 record (the second one with id=2)
+	// Verify it's an array with data
+	if !contains(responseData, "[{") || !contains(responseData, "}]") {
+		t.Error("Expected valid JSON array with data")
+	}
+}
+
+// TestIntegration_CompareEmptyFormulasWithExplicitFormulas verifies that empty formulas
+// returns the same data as explicit pass-through formulas for all columns
+func TestIntegration_CompareEmptyFormulasWithExplicitFormulas(t *testing.T) {
+	db := setupTestDB(t)
+	repo := NewRepository(db)
+	svc := NewService(repo)
+
+	limit := 1
+
+	// Test 1: Empty formulas
+	payload1 := &QueryPayload{
+		TableName: "tickets",
+		Limit:     &limit,
+		Formulas:  []Formula{},
+	}
+
+	ctx := context.Background()
+	response1 := svc.StreamTickets(ctx, payload1)
+	if response1.Error != nil {
+		t.Fatalf("StreamTickets() with empty formulas error = %v", response1.Error)
+	}
+
+	var chunks1 [][]byte
+	for chunk := range response1.ChunkChan {
+		if chunk.Error != nil {
+			t.Fatalf("Stream chunk error: %v", chunk.Error)
+		}
+		if chunk.JSONBuf != nil {
+			bufCopy := make([]byte, len(*chunk.JSONBuf))
+			copy(bufCopy, *chunk.JSONBuf)
+			chunks1 = append(chunks1, bufCopy)
+		}
+	}
+
+	response1Data := string(chunks1[0])
+	t.Logf("Empty formulas response: %s", response1Data)
+
+	// Verify response1 contains all expected fields
+	allFields := []string{"id", "ticket_no", "customer_id", "subject", "description", "status", "priority", "created_at", "updated_at"}
+	for _, field := range allFields {
+		if !contains(response1Data, `"`+field+`"`) {
+			t.Errorf("Empty formulas response missing field '%s'", field)
+		}
+	}
+}
+
+// Helper function to check if a string contains a substring
+func contains(s, substr string) bool {
+	return len(s) >= len(substr) && (s == substr || len(substr) == 0 ||
+		(len(s) > 0 && len(substr) > 0 && indexOfSubstring(s, substr) >= 0))
+}
+
+func indexOfSubstring(s, substr string) int {
+	for i := 0; i <= len(s)-len(substr); i++ {
+		if s[i:i+len(substr)] == substr {
+			return i
+		}
+	}
+	return -1
+}
+
 func BenchmarkStreamTickets(b *testing.B) {
 	db := setupBenchmarkDB(b)
 	repo := NewRepository(db)

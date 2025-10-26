@@ -76,6 +76,30 @@ func (s *Service) StreamTickets(ctx context.Context, payload *QueryPayload) midd
 		}
 	}
 
+	// Handle empty formulas: auto-generate pass-through formulas for all columns
+	// This enables SELECT * behavior when formulas is null or empty
+	if len(sortedFormulas) == 0 {
+		columns, err := rows.Columns()
+		if err != nil {
+			rows.Close()
+			return middleware.StreamResponse{
+				Code:  500,
+				Error: fmt.Errorf("failed to get columns for auto-formula generation: %w", err),
+			}
+		}
+
+		// Generate pass-through formulas (empty operator) for each column
+		sortedFormulas = make([]Formula, len(columns))
+		for i, colName := range columns {
+			sortedFormulas[i] = Formula{
+				Params:   []string{colName},
+				Field:    colName,
+				Operator: "", // Empty operator = pass-through
+				Position: i + 1,
+			}
+		}
+	}
+
 	// Stream processing with batching
 	batchSize := 100 // Process 100 rows at a time
 	if actualLimit > 0 && actualLimit < batchSize {
