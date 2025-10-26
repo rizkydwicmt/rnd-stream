@@ -4,16 +4,14 @@
 # ========================================================================
 # Build Stage
 # ========================================================================
-FROM --platform=$BUILDPLATFORM golang:1.23-alpine AS builder
+# Note: NOT using --platform=$BUILDPLATFORM to allow native compilation for each arch
+# This is required for CGO (sqlite3) support
+FROM golang:1.23-alpine AS builder
 
 # Build arguments
 ARG VERSION=dev
 ARG BUILD_TIME=unknown
 ARG GIT_COMMIT=unknown
-ARG TARGETPLATFORM
-ARG BUILDPLATFORM
-ARG TARGETOS
-ARG TARGETARCH
 
 # Install build dependencies (including gcc and musl-dev for CGO/sqlite3)
 RUN apk add --no-cache git make ca-certificates tzdata gcc musl-dev
@@ -31,8 +29,8 @@ RUN go mod download && go mod verify
 COPY . .
 
 # Build the application with CGO enabled for sqlite3
-# TARGETARCH is automatically set by Docker buildx for multi-arch builds
-RUN CGO_ENABLED=1 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build \
+# Each architecture builds natively (no cross-compilation)
+RUN CGO_ENABLED=1 go build \
     -v \
     -trimpath \
     -ldflags="-s -w -X main.Version=${VERSION} -X main.BuildTime=${BUILD_TIME} -X main.GitCommit=${GIT_COMMIT}" \
