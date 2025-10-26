@@ -8,12 +8,13 @@ import (
 
 // QueryPayload represents the incoming request payload
 type QueryPayload struct {
-	TableName string        `json:"tableName" binding:"required"`
-	OrderBy   []string      `json:"orderBy"`
-	Limit     *int          `json:"limit" binding:"omitempty,min=1"` // Pointer to allow null, no max limit
-	Offset    int           `json:"offset" binding:"min=0"`
-	Where     []WhereClause `json:"where"`
-	Formulas  []Formula     `json:"formulas"`
+	TableName    string        `json:"tableName" binding:"required"`
+	OrderBy      []string      `json:"orderBy"`
+	Limit        *int          `json:"limit" binding:"omitempty,min=1"` // Pointer to allow null, no max limit
+	Offset       int           `json:"offset" binding:"min=0"`
+	Where        []WhereClause `json:"where"`
+	Formulas     []Formula     `json:"formulas"`
+	IsFormatDate bool          `json:"isFormatDate"` // If true, format all date* fields to ISO 8601 GMT+7
 }
 
 // GetLimit returns the limit value, defaulting to 0 (unlimited) if not set

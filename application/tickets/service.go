@@ -106,7 +106,7 @@ func (s *Service) StreamTickets(ctx context.Context, payload *QueryPayload) midd
 		batchSize = actualLimit
 	}
 
-	chunkChan := s.streamProcessing(ctx, rows, sortedFormulas, batchSize)
+	chunkChan := s.streamProcessing(ctx, rows, sortedFormulas, batchSize, payload.IsFormatDate)
 
 	return middleware.StreamResponse{
 		TotalCount: totalCount,
@@ -121,6 +121,7 @@ func (s *Service) streamProcessing(
 	rows *sql.Rows,
 	formulas []Formula,
 	batchSize int,
+	isFormatDate bool,
 ) <-chan middleware.StreamChunk {
 	chunkChan := make(chan middleware.StreamChunk, 4)
 
@@ -169,7 +170,7 @@ func (s *Service) streamProcessing(
 				}
 
 				// Transform batch
-				transformed, err := BatchTransformRows(batch, formulas, s.operators)
+				transformed, err := BatchTransformRows(batch, formulas, s.operators, isFormatDate)
 				if err != nil {
 					chunkChan <- middleware.StreamChunk{
 						Error: fmt.Errorf("transformation failed: %w", err),

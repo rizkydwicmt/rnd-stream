@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"fmt"
 	"strings"
+	"time"
 )
 
 // ScanRowGeneric scans a single row into a RowData map using column metadata
@@ -127,7 +128,7 @@ func TransformRow(row RowData, formulas []Formula, operators map[string]Operator
 }
 
 // BatchTransformRows transforms multiple rows in batch
-func BatchTransformRows(rows []RowData, formulas []Formula, operators map[string]OperatorFunc) ([]TransformedRow, error) {
+func BatchTransformRows(rows []RowData, formulas []Formula, operators map[string]OperatorFunc, isFormatDate bool) ([]TransformedRow, error) {
 	results := make([]TransformedRow, len(rows))
 
 	for i, row := range rows {
@@ -135,8 +136,81 @@ func BatchTransformRows(rows []RowData, formulas []Formula, operators map[string
 		if err != nil {
 			return nil, fmt.Errorf("failed to transform row %d: %w", i, err)
 		}
+
+		// Post-process: format date* fields if requested
+		if isFormatDate {
+			transformed = formatDateFields(transformed)
+		}
+
 		results[i] = transformed
 	}
 
 	return results, nil
+}
+
+// formatDateFields formats all fields with "date" prefix to ISO 8601 GMT+7
+// Uses stack-allocated timezone for efficiency
+func formatDateFields(row TransformedRow) TransformedRow {
+	// Stack-allocated GMT+7 timezone (no heap allocation)
+	gmt7 := time.FixedZone("GMT+7", 7*3600)
+
+	// Modify fields in-place for efficiency
+	for i := range row.fields {
+		field := &row.fields[i]
+
+		// Check if field key starts with "date" prefix (case-insensitive)
+		if !strings.HasPrefix(strings.ToLower(field.Key), "date") {
+			continue
+		}
+
+		// Try to convert value to Unix timestamp
+		timestamp := toInt64(field.Value)
+		if timestamp == 0 {
+			// Not a valid timestamp, skip
+			continue
+		}
+
+		// Convert Unix timestamp to ISO 8601 with GMT+7
+		t := time.Unix(timestamp, 0).In(gmt7)
+		field.Value = t.Format(time.RFC3339)
+	}
+
+	return row
+}
+
+// toInt64 converts various numeric types to int64
+// Returns 0 if conversion fails or value is 0
+func toInt64(val interface{}) int64 {
+	if val == nil {
+		return 0
+	}
+
+	switch v := val.(type) {
+	case int:
+		return int64(v)
+	case int8:
+		return int64(v)
+	case int16:
+		return int64(v)
+	case int32:
+		return int64(v)
+	case int64:
+		return v
+	case uint:
+		return int64(v)
+	case uint8:
+		return int64(v)
+	case uint16:
+		return int64(v)
+	case uint32:
+		return int64(v)
+	case uint64:
+		return int64(v)
+	case float32:
+		return int64(v)
+	case float64:
+		return int64(v)
+	default:
+		return 0
+	}
 }
