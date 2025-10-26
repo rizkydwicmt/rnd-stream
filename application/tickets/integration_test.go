@@ -614,6 +614,352 @@ func indexOfSubstring(s, substr string) int {
 	return -1
 }
 
+// TestIntegration_NilOrderBy tests that queries work without ORDER BY when nil
+func TestIntegration_NilOrderBy(t *testing.T) {
+	db := setupTestDB(t)
+	repo := NewRepository(db)
+	svc := NewService(repo)
+
+	limit := 10
+	payload := &QueryPayload{
+		TableName: "tickets",
+		Limit:     &limit,
+		OrderBy:   nil, // Explicitly nil
+		Formulas: []Formula{
+			{Params: []string{"id"}, Field: "ticket_id", Operator: "", Position: 1},
+		},
+	}
+
+	ctx := context.Background()
+	response := svc.StreamTickets(ctx, payload)
+
+	if response.Error != nil {
+		t.Fatalf("StreamTickets() with nil OrderBy error = %v", response.Error)
+	}
+
+	if response.Code != 200 {
+		t.Errorf("Expected status code 200, got %d", response.Code)
+	}
+
+	if response.TotalCount != 3 {
+		t.Errorf("Expected total count 3, got %d", response.TotalCount)
+	}
+
+	// Consume stream
+	var receivedData int
+	for chunk := range response.ChunkChan {
+		if chunk.Error != nil {
+			t.Errorf("Stream chunk error: %v", chunk.Error)
+		}
+		if chunk.JSONBuf != nil {
+			receivedData++
+		}
+	}
+
+	if receivedData == 0 {
+		t.Error("Expected to receive data chunks, got 0")
+	}
+}
+
+// TestIntegration_EmptyOrderBy tests that queries work without ORDER BY when empty array
+func TestIntegration_EmptyOrderBy(t *testing.T) {
+	db := setupTestDB(t)
+	repo := NewRepository(db)
+	svc := NewService(repo)
+
+	limit := 10
+	payload := &QueryPayload{
+		TableName: "tickets",
+		Limit:     &limit,
+		OrderBy:   []string{}, // Explicitly empty
+		Formulas: []Formula{
+			{Params: []string{"id"}, Field: "ticket_id", Operator: "", Position: 1},
+		},
+	}
+
+	ctx := context.Background()
+	response := svc.StreamTickets(ctx, payload)
+
+	if response.Error != nil {
+		t.Fatalf("StreamTickets() with empty OrderBy error = %v", response.Error)
+	}
+
+	if response.Code != 200 {
+		t.Errorf("Expected status code 200, got %d", response.Code)
+	}
+
+	if response.TotalCount != 3 {
+		t.Errorf("Expected total count 3, got %d", response.TotalCount)
+	}
+
+	// Consume stream
+	var receivedData int
+	for chunk := range response.ChunkChan {
+		if chunk.Error != nil {
+			t.Errorf("Stream chunk error: %v", chunk.Error)
+		}
+		if chunk.JSONBuf != nil {
+			receivedData++
+		}
+	}
+
+	if receivedData == 0 {
+		t.Error("Expected to receive data chunks, got 0")
+	}
+}
+
+// TestIntegration_NoOrderByWithWhere tests query without ORDER BY but with WHERE clause
+func TestIntegration_NoOrderByWithWhere(t *testing.T) {
+	db := setupTestDB(t)
+	repo := NewRepository(db)
+	svc := NewService(repo)
+
+	limit := 10
+	payload := &QueryPayload{
+		TableName: "tickets",
+		Limit:     &limit,
+		Where: []WhereClause{
+			{Field: "status", Operator: "=", Value: "open"},
+		},
+		// OrderBy omitted (will be nil)
+		Formulas: []Formula{
+			{Params: []string{"id", "status"}, Field: "ticket_info", Operator: "concat", Position: 1},
+		},
+	}
+
+	ctx := context.Background()
+	response := svc.StreamTickets(ctx, payload)
+
+	if response.Error != nil {
+		t.Fatalf("StreamTickets() without OrderBy but with WHERE error = %v", response.Error)
+	}
+
+	if response.Code != 200 {
+		t.Errorf("Expected status code 200, got %d", response.Code)
+	}
+
+	// Should return only 2 tickets with status = "open"
+	if response.TotalCount != 2 {
+		t.Errorf("Expected total count 2 (only 'open' tickets), got %d", response.TotalCount)
+	}
+
+	// Consume stream
+	var chunks [][]byte
+	for chunk := range response.ChunkChan {
+		if chunk.Error != nil {
+			t.Fatalf("Stream chunk error: %v", chunk.Error)
+		}
+		if chunk.JSONBuf != nil {
+			bufCopy := make([]byte, len(*chunk.JSONBuf))
+			copy(bufCopy, *chunk.JSONBuf)
+			chunks = append(chunks, bufCopy)
+		}
+	}
+
+	if len(chunks) == 0 {
+		t.Fatal("Expected to receive data chunks, got 0")
+	}
+
+	responseData := string(chunks[0])
+	t.Logf("Response without OrderBy but with WHERE: %s", responseData)
+}
+
+// TestIntegration_NoOrderByWithLimitOffset tests pagination without ORDER BY
+func TestIntegration_NoOrderByWithLimitOffset(t *testing.T) {
+	db := setupTestDB(t)
+	repo := NewRepository(db)
+	svc := NewService(repo)
+
+	limit := 1
+	payload := &QueryPayload{
+		TableName: "tickets",
+		Limit:     &limit,
+		Offset:    1,
+		// OrderBy omitted
+		Formulas: []Formula{
+			{Params: []string{"id"}, Field: "ticket_id", Operator: "", Position: 1},
+		},
+	}
+
+	ctx := context.Background()
+	response := svc.StreamTickets(ctx, payload)
+
+	if response.Error != nil {
+		t.Fatalf("StreamTickets() without OrderBy but with LIMIT/OFFSET error = %v", response.Error)
+	}
+
+	if response.Code != 200 {
+		t.Errorf("Expected status code 200, got %d", response.Code)
+	}
+
+	// Total count should still be 3
+	if response.TotalCount != 3 {
+		t.Errorf("Expected total count 3, got %d", response.TotalCount)
+	}
+
+	// Consume stream
+	var chunks [][]byte
+	for chunk := range response.ChunkChan {
+		if chunk.Error != nil {
+			t.Fatalf("Stream chunk error: %v", chunk.Error)
+		}
+		if chunk.JSONBuf != nil {
+			bufCopy := make([]byte, len(*chunk.JSONBuf))
+			copy(bufCopy, *chunk.JSONBuf)
+			chunks = append(chunks, bufCopy)
+		}
+	}
+
+	responseData := string(chunks[0])
+	t.Logf("Response without OrderBy with LIMIT/OFFSET: %s", responseData)
+
+	// Should contain data (at most 1 record due to LIMIT 1)
+	if !contains(responseData, "[") || !contains(responseData, "]") {
+		t.Error("Expected valid JSON array")
+	}
+}
+
+// TestIntegration_NoOrderByWithEmptyFormulas tests SELECT * without ORDER BY
+func TestIntegration_NoOrderByWithEmptyFormulas(t *testing.T) {
+	db := setupTestDB(t)
+	repo := NewRepository(db)
+	svc := NewService(repo)
+
+	limit := 10
+	payload := &QueryPayload{
+		TableName: "tickets",
+		Limit:     &limit,
+		// No OrderBy, no Formulas - simplest query
+	}
+
+	ctx := context.Background()
+	response := svc.StreamTickets(ctx, payload)
+
+	if response.Error != nil {
+		t.Fatalf("StreamTickets() without OrderBy and Formulas error = %v", response.Error)
+	}
+
+	if response.Code != 200 {
+		t.Errorf("Expected status code 200, got %d", response.Code)
+	}
+
+	if response.TotalCount != 3 {
+		t.Errorf("Expected total count 3, got %d", response.TotalCount)
+	}
+
+	// Consume stream
+	var chunks [][]byte
+	for chunk := range response.ChunkChan {
+		if chunk.Error != nil {
+			t.Fatalf("Stream chunk error: %v", chunk.Error)
+		}
+		if chunk.JSONBuf != nil {
+			bufCopy := make([]byte, len(*chunk.JSONBuf))
+			copy(bufCopy, *chunk.JSONBuf)
+			chunks = append(chunks, bufCopy)
+		}
+	}
+
+	responseData := string(chunks[0])
+	t.Logf("Response without OrderBy or Formulas (SELECT *): %s", responseData)
+
+	// Verify we get actual data (all fields)
+	expectedFields := []string{"id", "ticket_no", "status"}
+	for _, field := range expectedFields {
+		if !contains(responseData, `"`+field+`"`) {
+			t.Errorf("Expected field '%s' in response data", field)
+		}
+	}
+}
+
+// TestQueryBuilder_NoOrderBy tests query building without ORDER BY clause
+func TestQueryBuilder_NoOrderBy(t *testing.T) {
+	tests := []struct {
+		name     string
+		orderBy  []string
+		expected string // Should NOT contain ORDER BY
+	}{
+		{
+			name:     "nil orderBy",
+			orderBy:  nil,
+			expected: "SELECT `id`, `status` FROM `tickets`",
+		},
+		{
+			name:     "empty orderBy array",
+			orderBy:  []string{},
+			expected: "SELECT `id`, `status` FROM `tickets`",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			payload := &QueryPayload{
+				TableName: "tickets",
+				OrderBy:   tt.orderBy,
+			}
+
+			qb := NewQueryBuilder(payload)
+			qb.SetSelectColumns([]string{"id", "status"})
+
+			query, _ := qb.BuildSelectQuery()
+
+			if query != tt.expected {
+				t.Errorf("Expected query: %s\nGot: %s", tt.expected, query)
+			}
+
+			// Verify query does NOT contain ORDER BY
+			if contains(query, "ORDER BY") {
+				t.Errorf("Query should not contain ORDER BY clause, got: %s", query)
+			}
+		})
+	}
+}
+
+// TestValidator_NoOrderByValidation tests that validation passes without OrderBy
+func TestValidator_NoOrderByValidation(t *testing.T) {
+	tests := []struct {
+		name    string
+		payload *QueryPayload
+		wantErr bool
+	}{
+		{
+			name: "valid payload without orderBy (nil)",
+			payload: &QueryPayload{
+				TableName: "tickets",
+				OrderBy:   nil,
+			},
+			wantErr: false,
+		},
+		{
+			name: "valid payload without orderBy (empty array)",
+			payload: &QueryPayload{
+				TableName: "tickets",
+				OrderBy:   []string{},
+			},
+			wantErr: false,
+		},
+		{
+			name: "valid payload with WHERE but no orderBy",
+			payload: &QueryPayload{
+				TableName: "tickets",
+				Where: []WhereClause{
+					{Field: "status", Operator: "=", Value: "open"},
+				},
+			},
+			wantErr: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ValidatePayload(tt.payload)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("ValidatePayload() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
 func BenchmarkStreamTickets(b *testing.B) {
 	db := setupBenchmarkDB(b)
 	repo := NewRepository(db)
