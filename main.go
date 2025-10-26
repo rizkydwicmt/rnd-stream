@@ -11,7 +11,6 @@ import (
 	"log"
 	"net/http"
 	"runtime"
-	"runtime/debug"
 	"stream/middleware"
 	"time"
 
@@ -26,12 +25,12 @@ import (
 )
 
 func main() {
-	runtime.GOMAXPROCS(1)
-	fmt.Printf("⚙️  CPU limit set to: %d core(s) (GOMAXPROCS=%d)\n", 1, runtime.GOMAXPROCS(0))
+	//runtime.GOMAXPROCS(1)
+	//fmt.Printf("⚙️  CPU limit set to: %d core(s) (GOMAXPROCS=%d)\n", 1, runtime.GOMAXPROCS(0))
 
 	// Set memory limit to 128 MB
-	memLimit := int64(128 * 1024 * 1024) // 128 MB in bytes
-	debug.SetMemoryLimit(memLimit)
+	//memLimit := int64(128 * 1024 * 1024) // 128 MB in bytes
+	//debug.SetMemoryLimit(memLimit)
 
 	// Load .env file
 	if err := godotenv.Load(); err != nil {
@@ -221,7 +220,7 @@ func seedData(db *gorm.DB) error {
 }
 
 func SetupRouter(dummyDB *gorm.DB, realDB *gorm.DB) *gin.Engine {
-	gin.SetMode(gin.ReleaseMode)
+	gin.SetMode(gin.DebugMode)
 	r := gin.New()
 	r.Use(gin.Recovery())
 	r.Use(middleware.RequestInit())
