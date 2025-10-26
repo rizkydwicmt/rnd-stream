@@ -960,6 +960,288 @@ func TestValidator_NoOrderByValidation(t *testing.T) {
 	}
 }
 
+// TestIntegration_DisableCount tests that count query is skipped when isDisableCount=true
+func TestIntegration_DisableCount(t *testing.T) {
+	db := setupTestDB(t)
+	repo := NewRepository(db)
+	svc := NewService(repo)
+
+	limit := 10
+	payload := &QueryPayload{
+		TableName:     "tickets",
+		Limit:         &limit,
+		IsDisableCount: true, // Disable count query
+		Formulas: []Formula{
+			{Params: []string{"id"}, Field: "ticket_id", Operator: "", Position: 1},
+		},
+	}
+
+	ctx := context.Background()
+	response := svc.StreamTickets(ctx, payload)
+
+	if response.Error != nil {
+		t.Fatalf("StreamTickets() with isDisableCount=true error = %v", response.Error)
+	}
+
+	if response.Code != 200 {
+		t.Errorf("Expected status code 200, got %d", response.Code)
+	}
+
+	// When count is disabled, TotalCount should be -1
+	if response.TotalCount != -1 {
+		t.Errorf("Expected TotalCount = -1 when count disabled, got %d", response.TotalCount)
+	}
+
+	// Consume stream to verify data is still returned
+	var receivedData int
+	for chunk := range response.ChunkChan {
+		if chunk.Error != nil {
+			t.Errorf("Stream chunk error: %v", chunk.Error)
+		}
+		if chunk.JSONBuf != nil {
+			receivedData++
+		}
+	}
+
+	if receivedData == 0 {
+		t.Error("Expected to receive data chunks even with count disabled, got 0")
+	}
+
+	t.Logf("Received data successfully with count disabled")
+}
+
+// TestIntegration_EnableCount tests that count query runs when isDisableCount=false
+func TestIntegration_EnableCount(t *testing.T) {
+	db := setupTestDB(t)
+	repo := NewRepository(db)
+	svc := NewService(repo)
+
+	limit := 10
+	payload := &QueryPayload{
+		TableName:     "tickets",
+		Limit:         &limit,
+		IsDisableCount: false, // Enable count query (default)
+		Formulas: []Formula{
+			{Params: []string{"id"}, Field: "ticket_id", Operator: "", Position: 1},
+		},
+	}
+
+	ctx := context.Background()
+	response := svc.StreamTickets(ctx, payload)
+
+	if response.Error != nil {
+		t.Fatalf("StreamTickets() with isDisableCount=false error = %v", response.Error)
+	}
+
+	if response.Code != 200 {
+		t.Errorf("Expected status code 200, got %d", response.Code)
+	}
+
+	// When count is enabled, TotalCount should be actual count (3 test tickets)
+	if response.TotalCount != 3 {
+		t.Errorf("Expected TotalCount = 3 when count enabled, got %d", response.TotalCount)
+	}
+
+	// Consume stream
+	var receivedData int
+	for chunk := range response.ChunkChan {
+		if chunk.Error != nil {
+			t.Errorf("Stream chunk error: %v", chunk.Error)
+		}
+		if chunk.JSONBuf != nil {
+			receivedData++
+		}
+	}
+
+	if receivedData == 0 {
+		t.Error("Expected to receive data chunks, got 0")
+	}
+}
+
+// TestIntegration_DefaultCountBehavior tests backward compatibility (count enabled by default)
+func TestIntegration_DefaultCountBehavior(t *testing.T) {
+	db := setupTestDB(t)
+	repo := NewRepository(db)
+	svc := NewService(repo)
+
+	limit := 10
+	payload := &QueryPayload{
+		TableName: "tickets",
+		Limit:     &limit,
+		// IsDisableCount omitted - should default to false (count enabled)
+		Formulas: []Formula{
+			{Params: []string{"id"}, Field: "ticket_id", Operator: "", Position: 1},
+		},
+	}
+
+	ctx := context.Background()
+	response := svc.StreamTickets(ctx, payload)
+
+	if response.Error != nil {
+		t.Fatalf("StreamTickets() with default count behavior error = %v", response.Error)
+	}
+
+	// Default behavior should include count
+	if response.TotalCount != 3 {
+		t.Errorf("Expected TotalCount = 3 with default behavior, got %d", response.TotalCount)
+	}
+}
+
+// TestIntegration_DisableCountWithWhere tests count disabled with WHERE clause
+func TestIntegration_DisableCountWithWhere(t *testing.T) {
+	db := setupTestDB(t)
+	repo := NewRepository(db)
+	svc := NewService(repo)
+
+	limit := 10
+	payload := &QueryPayload{
+		TableName:     "tickets",
+		Limit:         &limit,
+		IsDisableCount: true,
+		Where: []WhereClause{
+			{Field: "status", Operator: "=", Value: "open"},
+		},
+		Formulas: []Formula{
+			{Params: []string{"id"}, Field: "ticket_id", Operator: "", Position: 1},
+		},
+	}
+
+	ctx := context.Background()
+	response := svc.StreamTickets(ctx, payload)
+
+	if response.Error != nil {
+		t.Fatalf("StreamTickets() error = %v", response.Error)
+	}
+
+	// Count should be -1 even with WHERE clause
+	if response.TotalCount != -1 {
+		t.Errorf("Expected TotalCount = -1 with count disabled, got %d", response.TotalCount)
+	}
+
+	// Consume stream
+	var chunks [][]byte
+	for chunk := range response.ChunkChan {
+		if chunk.Error != nil {
+			t.Fatalf("Stream chunk error: %v", chunk.Error)
+		}
+		if chunk.JSONBuf != nil {
+			bufCopy := make([]byte, len(*chunk.JSONBuf))
+			copy(bufCopy, *chunk.JSONBuf)
+			chunks = append(chunks, bufCopy)
+		}
+	}
+
+	responseData := string(chunks[0])
+	t.Logf("Response with disabled count and WHERE: %s", responseData)
+
+	// Data should still be filtered by WHERE clause
+	if !contains(responseData, "[") {
+		t.Error("Expected valid JSON array")
+	}
+}
+
+// TestIntegration_DisableCountWithPagination tests count disabled with LIMIT/OFFSET
+func TestIntegration_DisableCountWithPagination(t *testing.T) {
+	db := setupTestDB(t)
+	repo := NewRepository(db)
+	svc := NewService(repo)
+
+	limit := 1
+	payload := &QueryPayload{
+		TableName:     "tickets",
+		Limit:         &limit,
+		Offset:        1,
+		IsDisableCount: true,
+		Formulas: []Formula{
+			{Params: []string{"id"}, Field: "ticket_id", Operator: "", Position: 1},
+		},
+	}
+
+	ctx := context.Background()
+	response := svc.StreamTickets(ctx, payload)
+
+	if response.Error != nil {
+		t.Fatalf("StreamTickets() error = %v", response.Error)
+	}
+
+	// Count disabled
+	if response.TotalCount != -1 {
+		t.Errorf("Expected TotalCount = -1, got %d", response.TotalCount)
+	}
+
+	// Pagination (LIMIT/OFFSET) should still work
+	var chunks [][]byte
+	for chunk := range response.ChunkChan {
+		if chunk.Error != nil {
+			t.Fatalf("Stream chunk error: %v", chunk.Error)
+		}
+		if chunk.JSONBuf != nil {
+			bufCopy := make([]byte, len(*chunk.JSONBuf))
+			copy(bufCopy, *chunk.JSONBuf)
+			chunks = append(chunks, bufCopy)
+		}
+	}
+
+	responseData := string(chunks[0])
+	t.Logf("Response with disabled count and pagination: %s", responseData)
+
+	// Should get data (second record due to OFFSET 1)
+	if !contains(responseData, "[") {
+		t.Error("Expected valid JSON array with pagination")
+	}
+}
+
+// TestIntegration_DisableCountWithEmptyFormulas tests SELECT * with count disabled
+func TestIntegration_DisableCountWithEmptyFormulas(t *testing.T) {
+	db := setupTestDB(t)
+	repo := NewRepository(db)
+	svc := NewService(repo)
+
+	limit := 10
+	payload := &QueryPayload{
+		TableName:     "tickets",
+		Limit:         &limit,
+		IsDisableCount: true,
+		// No formulas - SELECT * behavior
+	}
+
+	ctx := context.Background()
+	response := svc.StreamTickets(ctx, payload)
+
+	if response.Error != nil {
+		t.Fatalf("StreamTickets() error = %v", response.Error)
+	}
+
+	// Count disabled
+	if response.TotalCount != -1 {
+		t.Errorf("Expected TotalCount = -1, got %d", response.TotalCount)
+	}
+
+	// Consume stream
+	var chunks [][]byte
+	for chunk := range response.ChunkChan {
+		if chunk.Error != nil {
+			t.Fatalf("Stream chunk error: %v", chunk.Error)
+		}
+		if chunk.JSONBuf != nil {
+			bufCopy := make([]byte, len(*chunk.JSONBuf))
+			copy(bufCopy, *chunk.JSONBuf)
+			chunks = append(chunks, bufCopy)
+		}
+	}
+
+	responseData := string(chunks[0])
+	t.Logf("Response with disabled count and SELECT *: %s", responseData)
+
+	// Verify we get all fields
+	expectedFields := []string{"id", "ticket_no", "status"}
+	for _, field := range expectedFields {
+		if !contains(responseData, `"`+field+`"`) {
+			t.Errorf("Expected field '%s' in response", field)
+		}
+	}
+}
+
 func BenchmarkStreamTickets(b *testing.B) {
 	db := setupBenchmarkDB(b)
 	repo := NewRepository(db)

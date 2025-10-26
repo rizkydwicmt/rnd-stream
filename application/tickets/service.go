@@ -45,14 +45,21 @@ func (s *Service) StreamTickets(ctx context.Context, payload *QueryPayload) midd
 	qb := NewQueryBuilder(payload)
 	qb.SetSelectColumns(selectCols)
 
-	// Get total count
-	countQuery, countArgs := qb.BuildCountQuery()
-	totalCount, err := s.repo.ExecuteCount(ctx, countQuery, countArgs)
-	if err != nil {
-		return middleware.StreamResponse{
-			Code:  500,
-			Error: fmt.Errorf("failed to get count: %w", err),
+	// Get total count (skip if disabled for performance)
+	var totalCount int64
+	if !payload.IsDisableCount {
+		countQuery, countArgs := qb.BuildCountQuery()
+		count, err := s.repo.ExecuteCount(ctx, countQuery, countArgs)
+		if err != nil {
+			return middleware.StreamResponse{
+				Code:  500,
+				Error: fmt.Errorf("failed to get count: %w", err),
+			}
 		}
+		totalCount = count
+	} else {
+		// When count is disabled, set to -1 to indicate count was not performed
+		totalCount = -1
 	}
 
 	// Log query info
