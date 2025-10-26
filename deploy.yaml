@@ -44,6 +44,9 @@ spec:
           envFrom:
             - secretRef:
                 name: env-rnd-stream-secret
+          env:
+            - name: RANDOM_KEY
+              value: "thisisavery1"
           livenessProbe:
             httpGet:
               path: /health
@@ -86,3 +89,14 @@ spec:
       port: 80
       targetPort: 8080
       name: http
+
+
+#Quick start:
+#  # Deploy
+#  kubectl apply -f deploy.yaml
+#
+#  # Check status
+#  kubectl get pods -l app=rnd-stream
+#
+#  # View logs
+#  kubectl logs -f -l app=rnd-stream
