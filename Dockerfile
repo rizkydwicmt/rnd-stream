@@ -1,15 +1,19 @@
 # Multi-stage Dockerfile for Stream Application
-# Build stage uses full Go environment, final stage uses minimal scratch image
+# Build stage uses full Go environment, final stage uses minimal Alpine image
 
 # ========================================================================
 # Build Stage
 # ========================================================================
-FROM golang:1.23-alpine AS builder
+FROM --platform=$BUILDPLATFORM golang:1.23-alpine AS builder
 
 # Build arguments
 ARG VERSION=dev
 ARG BUILD_TIME=unknown
 ARG GIT_COMMIT=unknown
+ARG TARGETPLATFORM
+ARG BUILDPLATFORM
+ARG TARGETOS
+ARG TARGETARCH
 
 # Install build dependencies (including gcc and musl-dev for CGO/sqlite3)
 RUN apk add --no-cache git make ca-certificates tzdata gcc musl-dev
@@ -27,8 +31,8 @@ RUN go mod download && go mod verify
 COPY . .
 
 # Build the application with CGO enabled for sqlite3
-# Note: GOARCH is omitted to use native architecture (prevents cross-compilation issues with CGO)
-RUN CGO_ENABLED=1 GOOS=linux go build \
+# TARGETARCH is automatically set by Docker buildx for multi-arch builds
+RUN CGO_ENABLED=1 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build \
     -v \
     -trimpath \
     -ldflags="-s -w -X main.Version=${VERSION} -X main.BuildTime=${BUILD_TIME} -X main.GitCommit=${GIT_COMMIT}" \
