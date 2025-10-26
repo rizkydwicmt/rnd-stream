@@ -1,8 +1,9 @@
 package health
 
 import (
-	json "github.com/json-iterator/go"
 	"stream/middleware"
+
+	json "github.com/json-iterator/go"
 )
 
 type Service struct {

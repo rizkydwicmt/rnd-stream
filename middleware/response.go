@@ -41,20 +41,21 @@ func getStartTime(c *gin.Context) time.Time {
 func buildDebugInfo(c *gin.Context, r Response) *ResponseAPIDebug {
 	startTime := getStartTime(c)
 	endTime := time.Now()
-	err := r.Error.Error()
 
-	return &ResponseAPIDebug{
+	debug := &ResponseAPIDebug{
 		Version:   c.GetString("version"),
 		StartTime: startTime,
 		EndTime:   endTime,
 		RuntimeMs: endTime.Sub(startTime).Milliseconds(),
-		Error: func() *string {
-			if r.Error != nil {
-				return &err
-			}
-			return nil
-		}(),
+		Error:     nil,
 	}
+
+	if r.Error != nil {
+		errMsg := r.Error.Error()
+		debug.Error = &errMsg
+	}
+
+	return debug
 }
 
 func buildResponseAPI(c *gin.Context, r Response, shouldDebug bool) ResponseAPI {
