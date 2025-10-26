@@ -108,7 +108,7 @@ func (s *Service) StreamTickets(ctx context.Context, payload *QueryPayload) midd
 	}
 
 	// Stream processing with batching
-	batchSize := 100 // Process 100 rows at a time
+	batchSize := 1000 // Process 1000 rows at a time
 	if actualLimit > 0 && actualLimit < batchSize {
 		batchSize = actualLimit
 	}
