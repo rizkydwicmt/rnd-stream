@@ -1,0 +1,88 @@
+apiVersion: v1
+kind: Secret
+metadata:
+  name: env-rnd-stream-secret
+  namespace: default
+type: Opaque
+stringData:
+  APP_ENV: "production"
+  APP_PORT: "8080"
+  APP_TYPE: "service"
+
+---
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: rnd-stream
+  namespace: default
+  labels:
+    app: rnd-stream
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: rnd-stream
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 1  # Only allow 1 pod down during updates
+      maxSurge: 1        # Allow 1 extra pod during updates
+  template:
+    metadata:
+      labels:
+        app: rnd-stream
+    spec:
+      serviceAccountName: default
+      restartPolicy: Always
+      containers:
+        - name: rnd-stream
+          image: ghcr.io/rizkydwicmt/rnd-stream:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8080
+          envFrom:
+            - secretRef:
+                name: env-rnd-stream-secret
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 60
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 5
+          resources:
+            requests:
+              memory: "64Mi"
+              cpu: "100m"
+            limits:
+              memory: "256Mi"
+              cpu: "500m"
+
+---
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: rnd-stream-service
+  namespace: default
+  labels:
+    app: rnd-stream
+spec:
+  type: LoadBalancer
+  selector:
+    app: rnd-stream
+  ports:
+    - protocol: TCP
+      port: 80
+      targetPort: 8080
+      name: http
