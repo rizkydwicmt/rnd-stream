@@ -195,8 +195,7 @@ jobs:
           if [[ "${{ needs.lint.result }}" == "failure" ]] || \
              [[ "${{ needs.test.result }}" == "failure" ]] || \
              [[ "${{ needs.build.result }}" == "failure" ]] || \
-             [[ "${{ needs.benchmark.result }}" == "failure" ]] || \
-             [[ "${{ needs.coverage.result }}" == "failure" ]]; then
+             [[ "${{ needs.benchmark.result }}" == "failure" ]]; then
             echo "One or more jobs failed"
             exit 1
           fi

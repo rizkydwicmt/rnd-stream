@@ -534,12 +534,8 @@ func TestContacts(t *testing.T) {
 			name:   "JSON array of contacts",
 			params: []interface{}{`[{"contact_type":"email","contact_value":"test@example.com"}]`},
 			checkFunc: func(t *testing.T, result interface{}) {
-				resultMap, ok := result.(map[string]interface{})
-				if !ok {
-					t.Error("Expected map result")
-					return
-				}
-				contacts, ok := resultMap["contacts"].([]map[string]interface{})
+				// contacts() returns []map[string]interface{}
+				contacts, ok := result.([]map[string]interface{})
 				if !ok || len(contacts) == 0 {
 					t.Error("Expected contacts array")
 					return
@@ -553,14 +549,14 @@ func TestContacts(t *testing.T) {
 			name:   "JSON object with contacts key",
 			params: []interface{}{`{"contacts":[{"contact_type":"phone","contact_value":"123456"}]}`},
 			checkFunc: func(t *testing.T, result interface{}) {
-				resultMap := result.(map[string]interface{})
-				contacts := resultMap["contacts"].([]map[string]interface{})
-				if len(contacts) == 0 {
+				// contacts() returns []map[string]interface{}
+				contacts, ok := result.([]map[string]interface{})
+				if !ok || len(contacts) == 0 {
 					t.Error("Expected contacts array")
 					return
 				}
 				if contacts[0]["contact_type"] != "phone" {
-					t.Errorf("Expected phone contact type")
+					t.Errorf("Expected phone contact type, got %v", contacts[0]["contact_type"])
 				}
 			},
 		},
@@ -621,12 +617,8 @@ func TestTicketDate(t *testing.T) {
 			name:   "JSON array with status dates",
 			params: []interface{}{`[{"status_id":1,"date_create":"2024-01-15 10:30:00"}]`},
 			checkFunc: func(t *testing.T, result interface{}) {
-				resultMap, ok := result.(map[string]interface{})
-				if !ok {
-					t.Error("Expected map result")
-					return
-				}
-				statusDates, ok := resultMap["status_dates"].([]map[string]interface{})
+				// ticketDate() returns []map[string]interface{}
+				statusDates, ok := result.([]map[string]interface{})
 				if !ok || len(statusDates) == 0 {
 					t.Error("Expected status_dates array")
 					return
@@ -640,8 +632,12 @@ func TestTicketDate(t *testing.T) {
 			name:   "with custom date format",
 			params: []interface{}{`[{"status_id":1,"date_create":"2024-01-15 10:30:00"}]`, "2006-01-02"},
 			checkFunc: func(t *testing.T, result interface{}) {
-				resultMap := result.(map[string]interface{})
-				statusDates := resultMap["status_dates"].([]map[string]interface{})
+				// ticketDate() returns []map[string]interface{}
+				statusDates, ok := result.([]map[string]interface{})
+				if !ok || len(statusDates) == 0 {
+					t.Error("Expected status_dates array")
+					return
+				}
 				dateStr, ok := statusDates[0]["date_create"].(string)
 				if !ok {
 					t.Error("Expected string date")
