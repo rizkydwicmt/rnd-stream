@@ -95,9 +95,7 @@ func (s *service) StreamTickets(ctx context.Context, payload *domain.QueryPayloa
 	fetcher := stream.SQLFetcherWithColumns(rows, columns, scanner)
 
 	// Step 10: Define transformer using enhanced helper
-	domainTransform := func(row domain.RowData) (interface{}, error) {
-		return s.transformer.TransformRow(row, sortedFormulas, payload.IsFormatDate)
-	}
+	domainTransform := s.createTransformer(sortedFormulas, payload.IsFormatDate)
 	transformer := stream.TransformerAdapter(domainTransform)
 
 	// Step 11: Stream using internal/stream package
@@ -109,11 +107,19 @@ func (s *service) StreamTickets(ctx context.Context, payload *domain.QueryPayloa
 	return streamResp
 }
 
-// createScanner creates an EnhancedSQLRowScanner that wraps the domain scanner.
+// createScanner creates an SQLRowScanner that wraps the domain scanner.
 // This adapter allows using domain-specific scanner with stream helpers.
-func (s *service) createScanner() stream.EnhancedSQLRowScanner[domain.RowData] {
+func (s *service) createScanner() stream.SQLRowScanner[domain.RowData] {
 	return func(rows *sql.Rows, columns []string) (domain.RowData, error) {
 		return s.scanner.ScanRow(rows, columns)
+	}
+}
+
+// createTransformer creates a transformer function that transforms RowData using domain-specific logic.
+// This adapter allows using domain-specific transformer with stream helpers.
+func (s *service) createTransformer(sortedFormulas []domain.Formula, isFormatDate bool) func(domain.RowData) (interface{}, error) {
+	return func(row domain.RowData) (interface{}, error) {
+		return s.transformer.TransformRow(row, sortedFormulas, isFormatDate)
 	}
 }
 
@@ -180,9 +186,7 @@ func (s *service) StreamTicketsBatch(ctx context.Context, payload *domain.QueryP
 	batchFetcher := stream.SQLBatchFetcherWithColumns(rows, columns, streamer.GetConfig().BatchSize, scanner)
 
 	// Step 10: Define batch transformer using enhanced helper
-	domainTransform := func(row domain.RowData) (interface{}, error) {
-		return s.transformer.TransformRow(row, sortedFormulas, payload.IsFormatDate)
-	}
+	domainTransform := s.createTransformer(sortedFormulas, payload.IsFormatDate)
 	batchTransformer := stream.BatchTransformerAdapter(domainTransform)
 
 	// Step 11: Stream using batch processing
