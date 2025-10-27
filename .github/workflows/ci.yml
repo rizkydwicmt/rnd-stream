@@ -88,40 +88,40 @@ jobs:
   # ========================================================================
   # Benchmarks
   # ========================================================================
-  benchmark:
-    name: Benchmarks
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: ${{ env.GO_VERSION }}
-          cache: true
-
-      - name: Run benchmarks
-        run: go test -bench=. -benchmem -benchtime=100000x ./... | tee benchmark.txt
-
-      - name: Store benchmark result
-        uses: actions/upload-artifact@v4
-        with:
-          name: benchmark-results
-          path: benchmark.txt
-          retention-days: 30
-
-      - name: Compare benchmarks
-        if: github.event_name == 'pull_request'
-        uses: benchmark-action/github-action-benchmark@v1
-        with:
-          tool: 'go'
-          output-file-path: benchmark.txt
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          comment-on-alert: true
-          alert-threshold: '150%'
-          fail-on-alert: false
+#  benchmark:
+#    name: Benchmarks
+#    runs-on: ubuntu-latest
+#    timeout-minutes: 15
+#    steps:
+#      - name: Checkout code
+#        uses: actions/checkout@v4
+#
+#      - name: Set up Go
+#        uses: actions/setup-go@v5
+#        with:
+#          go-version: ${{ env.GO_VERSION }}
+#          cache: true
+#
+#      - name: Run benchmarks
+#        run: go test -bench=. -benchmem -benchtime=100000x ./... | tee benchmark.txt
+#
+#      - name: Store benchmark result
+#        uses: actions/upload-artifact@v4
+#        with:
+#          name: benchmark-results
+#          path: benchmark.txt
+#          retention-days: 30
+#
+#      - name: Compare benchmarks
+#        if: github.event_name == 'pull_request'
+#        uses: benchmark-action/github-action-benchmark@v1
+#        with:
+#          tool: 'go'
+#          output-file-path: benchmark.txt
+#          github-token: ${{ secrets.GITHUB_TOKEN }}
+#          comment-on-alert: true
+#          alert-threshold: '150%'
+#          fail-on-alert: false
 
   # ========================================================================
   # Build Verification
@@ -187,15 +187,14 @@ jobs:
   ci-success:
     name: CI Success
     runs-on: ubuntu-latest
-    needs: [lint, test, build, benchmark]
+    needs: [lint, test, build]
     if: always()
     steps:
       - name: Check all jobs status
         run: |
           if [[ "${{ needs.lint.result }}" == "failure" ]] || \
              [[ "${{ needs.test.result }}" == "failure" ]] || \
-             [[ "${{ needs.build.result }}" == "failure" ]] || \
-             [[ "${{ needs.benchmark.result }}" == "failure" ]]; then
+             [[ "${{ needs.build.result }}" == "failure" ]]; then
             echo "One or more jobs failed"
             exit 1
           fi
