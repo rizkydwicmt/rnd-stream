@@ -6,6 +6,9 @@ import (
 	"os"
 	"stream/application/health"
 	"stream/application/tickets"
+	"stream/application/ticketsV2/handler"
+	"stream/application/ticketsV2/repository"
+	"stream/application/ticketsV2/service"
 	"stream/common"
 
 	"log"
@@ -242,6 +245,16 @@ func SetupRouter(dummyDB *gorm.DB, realDB *gorm.DB) *gin.Engine {
 	realTicketsSvc := tickets.NewService(realTicketsRepo)
 	realTicketsHandler := tickets.NewHandler(realTicketsSvc)
 
+	// V2 - Dummy database tickets streaming endpoint
+	dummyTicketsV2Repo := repository.NewRepository(dummyDB)
+	dummyTicketsV2Svc := service.NewService(dummyTicketsV2Repo)
+	dummyTicketsV2Handler := handler.NewHandler(dummyTicketsV2Svc)
+
+	// V2 - Real database tickets streaming endpoint
+	realTicketsV2Repo := repository.NewRepository(realDB)
+	realTicketsV2Svc := service.NewService(realTicketsV2Repo)
+	realTicketsV2Handler := handler.NewHandler(realTicketsV2Svc)
+
 	// Register routes
 	api := r.Group("")
 	healthHandler.RegisterRoutes(api)
@@ -253,6 +266,14 @@ func SetupRouter(dummyDB *gorm.DB, realDB *gorm.DB) *gin.Engine {
 	// Register real database routes under /v1/tickets-real
 	realGroup := api.Group("/v1/tickets-real")
 	realTicketsHandler.RegisterRoutesWithPrefix(realGroup)
+
+	// Register V2 dummy database routes under /v2/tickets
+	dummyV2Group := api.Group("/v2/tickets")
+	dummyTicketsV2Handler.RegisterRoutesWithPrefix(dummyV2Group)
+
+	// Register V2 real database routes under /v2/tickets-real
+	realV2Group := api.Group("/v2/tickets-real")
+	realTicketsV2Handler.RegisterRoutesWithPrefix(realV2Group)
 
 	return r
 }
