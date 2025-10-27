@@ -2,10 +2,12 @@ package stream
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"testing"
 	"time"
 
+	"github.com/DATA-DOG/go-sqlmock"
 	json "github.com/json-iterator/go"
 )
 
@@ -466,6 +468,253 @@ func TestPassThroughTransformer(t *testing.T) {
 	}
 }
 
+func TestSQLFetcherWithColumns(t *testing.T) {
+	t.Run("successfully streams rows with columns", func(t *testing.T) {
+		// Create mock rows
+		db, mock, err := sqlmock.New()
+		if err != nil {
+			t.Fatalf("Failed to create mock: %v", err)
+		}
+		defer db.Close()
+
+		columns := []string{"id", "name", "age"}
+		rows := sqlmock.NewRows(columns).
+			AddRow(1, "Alice", 30).
+			AddRow(2, "Bob", 25).
+			AddRow(3, "Charlie", 35)
+
+		mock.ExpectQuery("SELECT").WillReturnRows(rows)
+
+		sqlRows, err := db.Query("SELECT id, name, age FROM users")
+		if err != nil {
+			t.Fatalf("Failed to create rows: %v", err)
+		}
+
+		// Create scanner
+		scanner := func(rows *sql.Rows, cols []string) (map[string]interface{}, error) {
+			values := make([]interface{}, len(cols))
+			valuePtrs := make([]interface{}, len(cols))
+			for i := range values {
+				valuePtrs[i] = &values[i]
+			}
+			if err := rows.Scan(valuePtrs...); err != nil {
+				return nil, err
+			}
+			result := make(map[string]interface{}, len(cols))
+			for i, col := range cols {
+				result[col] = values[i]
+			}
+			return result, nil
+		}
+
+		// Use fetcher
+		fetcher := SQLFetcherWithColumns(sqlRows, columns, scanner)
+		ctx := context.Background()
+		dataChan, errChan := fetcher(ctx)
+
+		// Collect results
+		var results []map[string]interface{}
+		for row := range dataChan {
+			results = append(results, row)
+		}
+
+		// Check errors
+		select {
+		case err := <-errChan:
+			if err != nil {
+				t.Errorf("Unexpected error: %v", err)
+			}
+		default:
+		}
+
+		// Verify results
+		if len(results) != 3 {
+			t.Errorf("Expected 3 rows, got %d", len(results))
+		}
+
+		if results[0]["name"] != "Alice" {
+			t.Errorf("Expected Alice, got %v", results[0]["name"])
+		}
+	})
+
+	t.Run("handles context cancellation", func(t *testing.T) {
+		db, mock, err := sqlmock.New()
+		if err != nil {
+			t.Fatalf("Failed to create mock: %v", err)
+		}
+		defer db.Close()
+
+		columns := []string{"id", "name"}
+		rows := sqlmock.NewRows(columns).
+			AddRow(1, "Alice").
+			AddRow(2, "Bob").
+			AddRow(3, "Charlie")
+
+		mock.ExpectQuery("SELECT").WillReturnRows(rows)
+
+		sqlRows, err := db.Query("SELECT id, name FROM users")
+		if err != nil {
+			t.Fatalf("Failed to create rows: %v", err)
+		}
+
+		scanner := GenericRowScanner()
+		fetcher := SQLFetcherWithColumns(sqlRows, columns, scanner)
+
+		// Cancel context immediately
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+
+		dataChan, _ := fetcher(ctx)
+
+		// Should not receive any items due to cancellation
+		count := 0
+		for range dataChan {
+			count++
+		}
+
+		if count > 0 {
+			t.Errorf("Expected no items due to cancellation, got %d", count)
+		}
+	})
+}
+
+func TestSQLBatchFetcherWithColumns(t *testing.T) {
+	t.Run("successfully streams batches with columns", func(t *testing.T) {
+		db, mock, err := sqlmock.New()
+		if err != nil {
+			t.Fatalf("Failed to create mock: %v", err)
+		}
+		defer db.Close()
+
+		columns := []string{"id", "value"}
+		rows := sqlmock.NewRows(columns)
+		for i := 1; i <= 10; i++ {
+			rows.AddRow(i, i*10)
+		}
+
+		mock.ExpectQuery("SELECT").WillReturnRows(rows)
+
+		sqlRows, err := db.Query("SELECT id, value FROM data")
+		if err != nil {
+			t.Fatalf("Failed to create rows: %v", err)
+		}
+
+		scanner := GenericRowScanner()
+		batchSize := 3
+		fetcher := SQLBatchFetcherWithColumns(sqlRows, columns, batchSize, scanner)
+
+		ctx := context.Background()
+		batchChan, errChan := fetcher(ctx)
+
+		// Collect batches
+		var allItems []map[string]interface{}
+		batchCount := 0
+
+		for batch := range batchChan {
+			batchCount++
+			allItems = append(allItems, batch...)
+		}
+
+		// Check errors
+		select {
+		case err := <-errChan:
+			if err != nil {
+				t.Errorf("Unexpected error: %v", err)
+			}
+		default:
+		}
+
+		// Verify: 10 items with batch size 3 should give 4 batches
+		if batchCount != 4 {
+			t.Errorf("Expected 4 batches, got %d", batchCount)
+		}
+
+		if len(allItems) != 10 {
+			t.Errorf("Expected 10 total items, got %d", len(allItems))
+		}
+	})
+
+	t.Run("handles scanner errors", func(t *testing.T) {
+		db, mock, err := sqlmock.New()
+		if err != nil {
+			t.Fatalf("Failed to create mock: %v", err)
+		}
+		defer db.Close()
+
+		columns := []string{"id"}
+		rows := sqlmock.NewRows(columns).AddRow(1)
+
+		mock.ExpectQuery("SELECT").WillReturnRows(rows)
+
+		sqlRows, err := db.Query("SELECT id FROM data")
+		if err != nil {
+			t.Fatalf("Failed to create rows: %v", err)
+		}
+
+		// Scanner that always fails
+		scanner := func(rows *sql.Rows, cols []string) (map[string]interface{}, error) {
+			return nil, fmt.Errorf("scanner error")
+		}
+
+		fetcher := SQLBatchFetcherWithColumns(sqlRows, columns, 3, scanner)
+		ctx := context.Background()
+		batchChan, errChan := fetcher(ctx)
+
+		// Drain batch channel
+		for range batchChan {
+		}
+
+		// Should receive error
+		select {
+		case err := <-errChan:
+			if err == nil {
+				t.Error("Expected error from scanner")
+			}
+		default:
+			t.Error("Expected error to be sent to errChan")
+		}
+	})
+}
+
+func TestGenericRowScanner(t *testing.T) {
+	t.Run("scans row to map correctly", func(t *testing.T) {
+		db, mock, err := sqlmock.New()
+		if err != nil {
+			t.Fatalf("Failed to create mock: %v", err)
+		}
+		defer db.Close()
+
+		columns := []string{"id", "name", "active"}
+		rows := sqlmock.NewRows(columns).AddRow(1, "test", true)
+
+		mock.ExpectQuery("SELECT").WillReturnRows(rows)
+
+		sqlRows, err := db.Query("SELECT id, name, active FROM users")
+		if err != nil {
+			t.Fatalf("Failed to create rows: %v", err)
+		}
+
+		scanner := GenericRowScanner()
+
+		if sqlRows.Next() {
+			result, err := scanner(sqlRows, columns)
+			if err != nil {
+				t.Errorf("Scanner failed: %v", err)
+			}
+
+			if result["name"] != "test" {
+				t.Errorf("Expected name='test', got %v", result["name"])
+			}
+
+			if result["id"] != int64(1) {
+				t.Errorf("Expected id=1, got %v", result["id"])
+			}
+		} else {
+			t.Error("Expected at least one row")
+		}
+	})
+}
+
 // BenchmarkStreamer benchmarks streaming performance
 func BenchmarkStreamer_Stream(b *testing.B) {
 	ctx := context.Background()
@@ -500,4 +749,155 @@ func BenchmarkStreamer_Stream(b *testing.B) {
 			_ = chunk
 		}
 	}
+}
+
+// BenchmarkSQLFetcherWithColumns benchmarks enhanced SQL fetcher
+func BenchmarkSQLFetcherWithColumns(b *testing.B) {
+	// Create mock DB
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		b.Fatalf("Failed to create mock: %v", err)
+	}
+	defer db.Close()
+
+	columns := []string{"id", "name", "value"}
+
+	b.ResetTimer()
+	b.ReportAllocs()
+
+	for i := 0; i < b.N; i++ {
+		b.StopTimer()
+		// Setup mock rows
+		rows := sqlmock.NewRows(columns)
+		for j := 0; j < 1000; j++ {
+			rows.AddRow(j, fmt.Sprintf("name%d", j), j*10)
+		}
+		mock.ExpectQuery("SELECT").WillReturnRows(rows)
+
+		sqlRows, _ := db.Query("SELECT id, name, value FROM data")
+		scanner := GenericRowScanner()
+		b.StartTimer()
+
+		// Benchmark fetcher
+		fetcher := SQLFetcherWithColumns(sqlRows, columns, scanner)
+		ctx := context.Background()
+		dataChan, _ := fetcher(ctx)
+
+		// Consume all items
+		count := 0
+		for range dataChan {
+			count++
+		}
+	}
+}
+
+// BenchmarkSQLBatchFetcherWithColumns benchmarks batch SQL fetcher
+func BenchmarkSQLBatchFetcherWithColumns(b *testing.B) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		b.Fatalf("Failed to create mock: %v", err)
+	}
+	defer db.Close()
+
+	columns := []string{"id", "value"}
+	batchSize := 1000
+
+	b.ResetTimer()
+	b.ReportAllocs()
+
+	for i := 0; i < b.N; i++ {
+		b.StopTimer()
+		rows := sqlmock.NewRows(columns)
+		for j := 0; j < 10000; j++ {
+			rows.AddRow(j, j*10)
+		}
+		mock.ExpectQuery("SELECT").WillReturnRows(rows)
+
+		sqlRows, _ := db.Query("SELECT id, value FROM data")
+		scanner := GenericRowScanner()
+		b.StartTimer()
+
+		// Benchmark batch fetcher
+		fetcher := SQLBatchFetcherWithColumns(sqlRows, columns, batchSize, scanner)
+		ctx := context.Background()
+		batchChan, _ := fetcher(ctx)
+
+		// Consume all batches
+		totalItems := 0
+		for batch := range batchChan {
+			totalItems += len(batch)
+		}
+	}
+}
+
+// BenchmarkGenericRowScanner benchmarks the generic scanner
+func BenchmarkGenericRowScanner(b *testing.B) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		b.Fatalf("Failed to create mock: %v", err)
+	}
+	defer db.Close()
+
+	columns := []string{"id", "name", "value", "active"}
+	rows := sqlmock.NewRows(columns)
+	for i := 0; i < 1000; i++ {
+		rows.AddRow(i, fmt.Sprintf("name%d", i), i*10, true)
+	}
+
+	mock.ExpectQuery("SELECT").WillReturnRows(rows)
+	sqlRows, _ := db.Query("SELECT id, name, value, active FROM data")
+
+	scanner := GenericRowScanner()
+
+	b.ResetTimer()
+	b.ReportAllocs()
+
+	count := 0
+	for sqlRows.Next() {
+		_, err := scanner(sqlRows, columns)
+		if err != nil {
+			b.Fatalf("Scanner failed: %v", err)
+		}
+		count++
+	}
+}
+
+// BenchmarkSliceReuse benchmarks batch slice reuse vs fresh allocation
+func BenchmarkSliceReuse(b *testing.B) {
+	batchSize := 1000
+
+	b.Run("WithReuse", func(b *testing.B) {
+		b.ReportAllocs()
+		batch := make([]int, 0, batchSize)
+
+		for i := 0; i < b.N; i++ {
+			// Fill batch
+			for j := 0; j < batchSize; j++ {
+				batch = append(batch, j)
+			}
+
+			// Process (copy)
+			_ = make([]int, len(batch))
+
+			// Reset for reuse
+			batch = batch[:0]
+		}
+	})
+
+	b.Run("WithoutReuse", func(b *testing.B) {
+		b.ReportAllocs()
+
+		for i := 0; i < b.N; i++ {
+			// Fresh allocation each time
+			batch := make([]int, 0, batchSize)
+
+			// Fill batch
+			for j := 0; j < batchSize; j++ {
+				batch = append(batch, j)
+			}
+
+			// Process (copy)
+			_ = make([]int, len(batch))
+		}
+	})
 }

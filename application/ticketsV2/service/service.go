@@ -90,8 +90,9 @@ func (s *service) StreamTickets(ctx context.Context, payload *domain.QueryPayloa
 	// Step 8: Create streamer with default configuration
 	streamer := stream.NewDefaultStreamer[domain.RowData]()
 
-	// Step 9: Define data fetcher
-	fetcher := s.createFetcher(ctx, rows, columns)
+	// Step 9: Define data fetcher using stream.SQLFetcherWithColumns
+	scanner := s.createScanner()
+	fetcher := stream.SQLFetcherWithColumns(rows, columns, scanner)
 
 	// Step 10: Define transformer
 	transformer := s.createTransformer(sortedFormulas, payload.IsFormatDate)
@@ -105,47 +106,11 @@ func (s *service) StreamTickets(ctx context.Context, payload *domain.QueryPayloa
 	return streamResp
 }
 
-// createFetcher creates a DataFetcher for streaming rows
-func (s *service) createFetcher(ctx context.Context, rows *sql.Rows, columns []string) stream.DataFetcher[domain.RowData] {
-	return func(ctx context.Context) (<-chan domain.RowData, <-chan error) {
-		dataChan := make(chan domain.RowData, 10)
-		errChan := make(chan error, 1)
-
-		go func() {
-			defer close(dataChan)
-			defer close(errChan)
-			defer rows.Close()
-
-			for rows.Next() {
-				// Check context cancellation
-				select {
-				case <-ctx.Done():
-					return
-				default:
-				}
-
-				// Scan row
-				row, err := s.scanner.ScanRow(rows, columns)
-				if err != nil {
-					errChan <- fmt.Errorf("failed to scan row: %w", err)
-					return
-				}
-
-				// Send row to channel
-				select {
-				case dataChan <- row:
-				case <-ctx.Done():
-					return
-				}
-			}
-
-			// Check for errors during iteration
-			if err := rows.Err(); err != nil {
-				errChan <- fmt.Errorf("error iterating rows: %w", err)
-			}
-		}()
-
-		return dataChan, errChan
+// createScanner creates an EnhancedSQLRowScanner that wraps the domain scanner.
+// This adapter allows using domain-specific scanner with stream helpers.
+func (s *service) createScanner() stream.EnhancedSQLRowScanner[domain.RowData] {
+	return func(rows *sql.Rows, columns []string) (domain.RowData, error) {
+		return s.scanner.ScanRow(rows, columns)
 	}
 }
 
@@ -220,8 +185,9 @@ func (s *service) StreamTicketsBatch(ctx context.Context, payload *domain.QueryP
 	// Step 8: Create streamer with default configuration
 	streamer := stream.NewDefaultStreamer[domain.RowData]()
 
-	// Step 9: Define batch fetcher
-	batchFetcher := s.createBatchFetcher(ctx, rows, columns, streamer.GetConfig().BatchSize)
+	// Step 9: Define batch fetcher using stream.SQLBatchFetcherWithColumns
+	scanner := s.createScanner()
+	batchFetcher := stream.SQLBatchFetcherWithColumns(rows, columns, streamer.GetConfig().BatchSize, scanner)
 
 	// Step 10: Define batch transformer
 	batchTransformer := s.createBatchTransformer(sortedFormulas, payload.IsFormatDate)
@@ -233,73 +199,6 @@ func (s *service) StreamTicketsBatch(ctx context.Context, payload *domain.QueryP
 	streamResp.TotalCount = totalCount
 
 	return streamResp
-}
-
-// createBatchFetcher creates a BatchFetcher for streaming rows in batches
-func (s *service) createBatchFetcher(ctx context.Context, rows *sql.Rows, columns []string, batchSize int) stream.BatchFetcher[domain.RowData] {
-	return func(ctx context.Context) (<-chan []domain.RowData, <-chan error) {
-		dataChan := make(chan []domain.RowData, 2)
-		errChan := make(chan error, 1)
-
-		go func() {
-			defer close(dataChan)
-			defer close(errChan)
-			defer rows.Close()
-
-			batch := make([]domain.RowData, 0, batchSize)
-
-			for rows.Next() {
-				// Check context cancellation
-				select {
-				case <-ctx.Done():
-					return
-				default:
-				}
-
-				// Scan row
-				row, err := s.scanner.ScanRow(rows, columns)
-				if err != nil {
-					errChan <- fmt.Errorf("failed to scan row: %w", err)
-					return
-				}
-
-				// Add to batch
-				batch = append(batch, row)
-
-				// Send batch when it reaches batchSize
-				if len(batch) >= batchSize {
-					// Create a copy to avoid race conditions
-					batchCopy := make([]domain.RowData, len(batch))
-					copy(batchCopy, batch)
-
-					select {
-					case dataChan <- batchCopy:
-					case <-ctx.Done():
-						return
-					}
-
-					// Reset batch
-					batch = batch[:0]
-				}
-			}
-
-			// Send remaining rows
-			if len(batch) > 0 {
-				select {
-				case dataChan <- batch:
-				case <-ctx.Done():
-					return
-				}
-			}
-
-			// Check for errors during iteration
-			if err := rows.Err(); err != nil {
-				errChan <- fmt.Errorf("error iterating rows: %w", err)
-			}
-		}()
-
-		return dataChan, errChan
-	}
 }
 
 // createBatchTransformer creates a BatchTransformer function for processing batches
