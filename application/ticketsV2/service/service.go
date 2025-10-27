@@ -94,8 +94,11 @@ func (s *service) StreamTickets(ctx context.Context, payload *domain.QueryPayloa
 	scanner := s.createScanner()
 	fetcher := stream.SQLFetcherWithColumns(rows, columns, scanner)
 
-	// Step 10: Define transformer
-	transformer := s.createTransformer(sortedFormulas, payload.IsFormatDate)
+	// Step 10: Define transformer using enhanced helper
+	domainTransform := func(row domain.RowData) (interface{}, error) {
+		return s.transformer.TransformRow(row, sortedFormulas, payload.IsFormatDate)
+	}
+	transformer := stream.TransformerAdapter(domainTransform)
 
 	// Step 11: Stream using internal/stream package
 	streamResp := streamer.Stream(ctx, fetcher, transformer)
@@ -111,19 +114,6 @@ func (s *service) StreamTickets(ctx context.Context, payload *domain.QueryPayloa
 func (s *service) createScanner() stream.EnhancedSQLRowScanner[domain.RowData] {
 	return func(rows *sql.Rows, columns []string) (domain.RowData, error) {
 		return s.scanner.ScanRow(rows, columns)
-	}
-}
-
-// createTransformer creates a Transformer function
-func (s *service) createTransformer(formulas []domain.Formula, isFormatDate bool) stream.Transformer[domain.RowData] {
-	return func(row domain.RowData) (interface{}, error) {
-		// Transform the row using formulas
-		transformed, err := s.transformer.TransformRow(row, formulas, isFormatDate)
-		if err != nil {
-			return nil, fmt.Errorf("failed to transform row: %w", err)
-		}
-
-		return transformed, nil
 	}
 }
 
@@ -189,8 +179,11 @@ func (s *service) StreamTicketsBatch(ctx context.Context, payload *domain.QueryP
 	scanner := s.createScanner()
 	batchFetcher := stream.SQLBatchFetcherWithColumns(rows, columns, streamer.GetConfig().BatchSize, scanner)
 
-	// Step 10: Define batch transformer
-	batchTransformer := s.createBatchTransformer(sortedFormulas, payload.IsFormatDate)
+	// Step 10: Define batch transformer using enhanced helper
+	domainTransform := func(row domain.RowData) (interface{}, error) {
+		return s.transformer.TransformRow(row, sortedFormulas, payload.IsFormatDate)
+	}
+	batchTransformer := stream.BatchTransformerAdapter(domainTransform)
 
 	// Step 11: Stream using batch processing
 	streamResp := streamer.StreamBatch(ctx, batchFetcher, batchTransformer)
@@ -199,25 +192,6 @@ func (s *service) StreamTicketsBatch(ctx context.Context, payload *domain.QueryP
 	streamResp.TotalCount = totalCount
 
 	return streamResp
-}
-
-// createBatchTransformer creates a BatchTransformer function for processing batches
-func (s *service) createBatchTransformer(formulas []domain.Formula, isFormatDate bool) stream.BatchTransformer[domain.RowData] {
-	return func(rows []domain.RowData) ([]interface{}, error) {
-		// Pre-allocate result slice
-		result := make([]interface{}, len(rows))
-
-		// Transform each row in the batch
-		for i, row := range rows {
-			transformed, err := s.transformer.TransformRow(row, formulas, isFormatDate)
-			if err != nil {
-				return nil, fmt.Errorf("failed to transform row at index %d: %w", i, err)
-			}
-			result[i] = transformed
-		}
-
-		return result, nil
-	}
 }
 
 // LogRequest logs request information

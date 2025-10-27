@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"sync"
 )
 
 // SQLRowScanner is a function that scans a SQL row into a custom type.
@@ -611,6 +612,296 @@ func GenericRowScanner() EnhancedSQLRowScanner[map[string]interface{}] {
 		result := make(map[string]interface{}, len(columns))
 		for i, colName := range columns {
 			result[colName] = values[i]
+		}
+
+		return result, nil
+	}
+}
+
+// ============================================================================
+// Enhanced Transformation Helpers
+// ============================================================================
+
+// DomainTransformer is an interface for domain-specific transformation logic.
+// This allows wrapping any domain transformer into the stream.Transformer interface.
+//
+// Example domain transformer:
+//
+//	type TicketTransformer interface {
+//	    TransformRow(row RowData, formulas []Formula, isFormatDate bool) (TransformedRow, error)
+//	}
+type DomainTransformer[TIn, TOut any] interface {
+	Transform(input TIn) (TOut, error)
+}
+
+// TransformerAdapter creates a stream.Transformer from a domain-specific transformer.
+// This eliminates the need to manually wrap domain transformers in each service.
+//
+// Parameters:
+//   - domainTransformer: Domain-specific transformation function
+//
+// Returns:
+//   - stream.Transformer that wraps the domain transformer
+//
+// Usage:
+//
+//	// Domain transformer
+//	domainTrans := func(row RowData) (TransformedRow, error) {
+//	    return transformLogic(row)
+//	}
+//
+//	// Wrap it
+//	transformer := stream.TransformerAdapter(domainTrans)
+//	response := streamer.Stream(ctx, fetcher, transformer)
+//
+// Benefits:
+//   - Eliminates createTransformer() boilerplate
+//   - Type-safe wrapping
+//   - Consistent error handling
+//   - Reusable across services
+func TransformerAdapter[T any](domainTransform func(T) (interface{}, error)) Transformer[T] {
+	return func(item T) (interface{}, error) {
+		result, err := domainTransform(item)
+		if err != nil {
+			return nil, fmt.Errorf("transformation error: %w", err)
+		}
+		return result, nil
+	}
+}
+
+// BatchTransformerAdapter creates a stream.BatchTransformer from domain logic.
+// This provides optimized batch transformation with pre-allocation.
+//
+// Parameters:
+//   - domainTransform: Function to transform a single item
+//
+// Returns:
+//   - stream.BatchTransformer that processes items in batches
+//
+// Usage:
+//
+//	domainTrans := func(row RowData) (TransformedRow, error) {
+//	    return transform(row)
+//	}
+//
+//	batchTransformer := stream.BatchTransformerAdapter(domainTrans)
+//	response := streamer.StreamBatch(ctx, fetcher, batchTransformer)
+//
+// Performance Characteristics:
+//   - Pre-allocates result slice with exact capacity
+//   - Fail-fast on first error
+//   - O(n) time complexity
+//   - O(n) space complexity
+//
+// Error Handling:
+//   - Returns immediately on first transformation error
+//   - Includes item index in error message
+//   - Preserves original error context
+func BatchTransformerAdapter[T any](domainTransform func(T) (interface{}, error)) BatchTransformer[T] {
+	return func(items []T) ([]interface{}, error) {
+		// Pre-allocate result slice with exact capacity
+		result := make([]interface{}, len(items))
+
+		// Transform each item
+		for i, item := range items {
+			transformed, err := domainTransform(item)
+			if err != nil {
+				return nil, fmt.Errorf("transformation error at index %d: %w", i, err)
+			}
+			result[i] = transformed
+		}
+
+		return result, nil
+	}
+}
+
+// BatchTransformerWithContext creates a context-aware batch transformer.
+// This variant supports context cancellation during batch processing.
+//
+// Parameters:
+//   - ctx: Context for cancellation
+//   - domainTransform: Function to transform a single item
+//
+// Returns:
+//   - stream.BatchTransformer with cancellation support
+//
+// Usage:
+//
+//	transformer := stream.BatchTransformerWithContext(ctx, func(row RowData) (interface{}, error) {
+//	    // Transformation logic
+//	    return transform(row), nil
+//	})
+//
+// Benefits:
+//   - Respects context cancellation
+//   - Early exit on ctx.Done()
+//   - Useful for long-running transformations
+func BatchTransformerWithContext[T any](ctx context.Context, domainTransform func(T) (interface{}, error)) BatchTransformer[T] {
+	return func(items []T) ([]interface{}, error) {
+		result := make([]interface{}, len(items))
+
+		for i, item := range items {
+			// Check for cancellation
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			default:
+			}
+
+			transformed, err := domainTransform(item)
+			if err != nil {
+				return nil, fmt.Errorf("transformation error at index %d: %w", i, err)
+			}
+			result[i] = transformed
+		}
+
+		return result, nil
+	}
+}
+
+// TransformationChain chains multiple transformers sequentially.
+// Each transformer receives the output of the previous one.
+//
+// Parameters:
+//   - transformers: Variable number of transformation functions
+//
+// Returns:
+//   - Single transformer that applies all transformations in order
+//
+// Usage:
+//
+//	transformer := stream.TransformationChain[RowData](
+//	    validateTransform,
+//	    enrichTransform,
+//	    formatTransform,
+//	)
+//
+// Example:
+//
+//	chain := stream.TransformationChain[map[string]interface{}](
+//	    func(item map[string]interface{}) (interface{}, error) {
+//	        // Step 1: Validate
+//	        if item["id"] == nil {
+//	            return nil, errors.New("missing id")
+//	        }
+//	        return item, nil
+//	    },
+//	    func(item interface{}) (interface{}, error) {
+//	        // Step 2: Enrich
+//	        m := item.(map[string]interface{})
+//	        m["enriched"] = true
+//	        return m, nil
+//	    },
+//	)
+//
+// Benefits:
+//   - Compose complex transformations from simple ones
+//   - Reusable transformation steps
+//   - Clear separation of concerns
+func TransformationChain[T any](transformers ...func(interface{}) (interface{}, error)) Transformer[T] {
+	return func(item T) (interface{}, error) {
+		var current interface{} = item
+
+		for i, transform := range transformers {
+			result, err := transform(current)
+			if err != nil {
+				return nil, fmt.Errorf("transformation chain error at step %d: %w", i, err)
+			}
+			current = result
+		}
+
+		return current, nil
+	}
+}
+
+// BatchTransformParallel transforms batch items in parallel using goroutines.
+// This is useful for CPU-intensive or I/O-bound transformations.
+//
+// Parameters:
+//   - ctx: Context for cancellation
+//   - workerCount: Number of parallel workers (recommend: runtime.NumCPU())
+//   - domainTransform: Function to transform a single item
+//
+// Returns:
+//   - stream.BatchTransformer that processes in parallel
+//
+// Usage:
+//
+//	transformer := stream.BatchTransformParallel(ctx, 4, func(row RowData) (interface{}, error) {
+//	    // CPU-intensive transformation
+//	    return heavyTransform(row), nil
+//	})
+//
+// Performance Characteristics:
+//   - Scales with CPU cores
+//   - Best for independent transformations
+//   - Order preservation: results maintain input order
+//   - Memory: O(n) for result collection
+//
+// Warning:
+//   - Only use for CPU-intensive or I/O-bound transformations
+//   - Overhead of goroutines may hurt performance for simple transforms
+//   - Ensure transformations are goroutine-safe
+func BatchTransformParallel[T any](ctx context.Context, workerCount int, domainTransform func(T) (interface{}, error)) BatchTransformer[T] {
+	return func(items []T) ([]interface{}, error) {
+		if workerCount <= 0 {
+			workerCount = 1
+		}
+
+		result := make([]interface{}, len(items))
+		errChan := make(chan error, workerCount)
+
+		// Create work channel
+		type work struct {
+			index int
+			item  T
+		}
+		workChan := make(chan work, len(items))
+
+		// Start workers
+		var wg sync.WaitGroup
+		for w := 0; w < workerCount; w++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				for job := range workChan {
+					select {
+					case <-ctx.Done():
+						return
+					default:
+					}
+
+					transformed, err := domainTransform(job.item)
+					if err != nil {
+						select {
+						case errChan <- fmt.Errorf("transformation error at index %d: %w", job.index, err):
+						default:
+						}
+						return
+					}
+					result[job.index] = transformed
+				}
+			}()
+		}
+
+		// Send work
+		for i, item := range items {
+			select {
+			case <-ctx.Done():
+				close(workChan)
+				return nil, ctx.Err()
+			case workChan <- work{index: i, item: item}:
+			}
+		}
+		close(workChan)
+
+		// Wait for completion
+		wg.Wait()
+		close(errChan)
+
+		// Check for errors
+		if err := <-errChan; err != nil {
+			return nil, err
 		}
 
 		return result, nil
