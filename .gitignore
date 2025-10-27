@@ -1,5 +1,4 @@
 .env
 /example
-stream
 .idea/
 deploy.yaml

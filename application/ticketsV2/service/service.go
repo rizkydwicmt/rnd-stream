@@ -162,6 +162,165 @@ func (s *service) createTransformer(formulas []domain.Formula, isFormatDate bool
 	}
 }
 
+// StreamTicketsBatch streams ticket data using batch processing for better performance
+func (s *service) StreamTicketsBatch(ctx context.Context, payload *domain.QueryPayload) middleware.StreamResponse {
+	// Step 1: Validate payload
+	if err := s.validator.Validate(payload); err != nil {
+		return middleware.StreamResponse{
+			Code:  400,
+			Error: fmt.Errorf("validation error: %w", err),
+		}
+	}
+
+	// Step 2: Sort formulas by position
+	sortedFormulas := s.validator.SortFormulas(payload.Formulas)
+
+	// Step 3: Generate SELECT list from formulas
+	selectList := repository.GenerateUniqueSelectList(sortedFormulas)
+
+	// Step 4: Build queries
+	qb := repository.NewQueryBuilder(payload)
+	qb.SetSelectColumns(selectList)
+
+	mainQuery, mainArgs := qb.BuildSelectQuery()
+
+	// Step 5: Execute count query (if not disabled)
+	var totalCount int64 = -1
+	if !payload.IsDisableCount {
+		countQuery, countArgs := qb.BuildCountQuery()
+		count, err := s.repo.ExecuteCountQuery(ctx, countQuery, countArgs...)
+		if err != nil {
+			return middleware.StreamResponse{
+				Code:  500,
+				Error: fmt.Errorf("failed to execute count query: %w", err),
+			}
+		}
+		totalCount = count
+	}
+
+	// Step 6: Execute main query
+	rows, err := s.repo.ExecuteQuery(ctx, mainQuery, mainArgs...)
+	if err != nil {
+		return middleware.StreamResponse{
+			Code:  500,
+			Error: fmt.Errorf("failed to execute main query: %w", err),
+		}
+	}
+
+	// Step 7: Get column names
+	columns, err := s.repo.GetColumnNames(rows)
+	if err != nil {
+		rows.Close()
+		return middleware.StreamResponse{
+			Code:  500,
+			Error: fmt.Errorf("failed to get column names: %w", err),
+		}
+	}
+
+	// Step 8: Create streamer with default configuration
+	streamer := stream.NewDefaultStreamer[domain.RowData]()
+
+	// Step 9: Define batch fetcher
+	batchFetcher := s.createBatchFetcher(ctx, rows, columns, streamer.GetConfig().BatchSize)
+
+	// Step 10: Define batch transformer
+	batchTransformer := s.createBatchTransformer(sortedFormulas, payload.IsFormatDate)
+
+	// Step 11: Stream using batch processing
+	streamResp := streamer.StreamBatch(ctx, batchFetcher, batchTransformer)
+
+	// Step 12: Set total count
+	streamResp.TotalCount = totalCount
+
+	return streamResp
+}
+
+// createBatchFetcher creates a BatchFetcher for streaming rows in batches
+func (s *service) createBatchFetcher(ctx context.Context, rows *sql.Rows, columns []string, batchSize int) stream.BatchFetcher[domain.RowData] {
+	return func(ctx context.Context) (<-chan []domain.RowData, <-chan error) {
+		dataChan := make(chan []domain.RowData, 2)
+		errChan := make(chan error, 1)
+
+		go func() {
+			defer close(dataChan)
+			defer close(errChan)
+			defer rows.Close()
+
+			batch := make([]domain.RowData, 0, batchSize)
+
+			for rows.Next() {
+				// Check context cancellation
+				select {
+				case <-ctx.Done():
+					return
+				default:
+				}
+
+				// Scan row
+				row, err := s.scanner.ScanRow(rows, columns)
+				if err != nil {
+					errChan <- fmt.Errorf("failed to scan row: %w", err)
+					return
+				}
+
+				// Add to batch
+				batch = append(batch, row)
+
+				// Send batch when it reaches batchSize
+				if len(batch) >= batchSize {
+					// Create a copy to avoid race conditions
+					batchCopy := make([]domain.RowData, len(batch))
+					copy(batchCopy, batch)
+
+					select {
+					case dataChan <- batchCopy:
+					case <-ctx.Done():
+						return
+					}
+
+					// Reset batch
+					batch = batch[:0]
+				}
+			}
+
+			// Send remaining rows
+			if len(batch) > 0 {
+				select {
+				case dataChan <- batch:
+				case <-ctx.Done():
+					return
+				}
+			}
+
+			// Check for errors during iteration
+			if err := rows.Err(); err != nil {
+				errChan <- fmt.Errorf("error iterating rows: %w", err)
+			}
+		}()
+
+		return dataChan, errChan
+	}
+}
+
+// createBatchTransformer creates a BatchTransformer function for processing batches
+func (s *service) createBatchTransformer(formulas []domain.Formula, isFormatDate bool) stream.BatchTransformer[domain.RowData] {
+	return func(rows []domain.RowData) ([]interface{}, error) {
+		// Pre-allocate result slice
+		result := make([]interface{}, len(rows))
+
+		// Transform each row in the batch
+		for i, row := range rows {
+			transformed, err := s.transformer.TransformRow(row, formulas, isFormatDate)
+			if err != nil {
+				return nil, fmt.Errorf("failed to transform row at index %d: %w", i, err)
+			}
+			result[i] = transformed
+		}
+
+		return result, nil
+	}
+}
+
 // LogRequest logs request information
 func (s *service) LogRequest(requestID string, payload *domain.QueryPayload, duration interface{}, err error) {
 	var durationMs int64

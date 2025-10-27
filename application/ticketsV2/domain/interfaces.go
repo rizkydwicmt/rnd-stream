@@ -71,6 +71,9 @@ type Service interface {
 	// StreamTickets streams ticket data using the internal/stream package
 	StreamTickets(ctx context.Context, payload *QueryPayload) middleware.StreamResponse
 
+	// StreamTicketsBatch streams ticket data using batch processing for better performance
+	StreamTicketsBatch(ctx context.Context, payload *QueryPayload) middleware.StreamResponse
+
 	// LogRequest logs request information
 	LogRequest(requestID string, payload *QueryPayload, duration interface{}, err error)
 }
