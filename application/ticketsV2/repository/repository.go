@@ -49,12 +49,22 @@ func (r *repository) ExecuteCountQuery(ctx context.Context, query string, args .
 }
 
 // GetColumnNames extracts column names from sql.Rows
-func (r *repository) GetColumnNames(rows *sql.Rows) ([]string, error) {
+func (r *repository) GetColumnNames(rows *sql.Rows) ([]string, []domain.Formula, error) {
 	columns, err := rows.Columns()
 	if err != nil {
-		return nil, fmt.Errorf("failed to get columns: %w", err)
+		return nil, nil, fmt.Errorf("failed to get columns: %w", err)
 	}
-	return columns, nil
+
+	formulas := make([]domain.Formula, len(columns))
+	for i, colName := range columns {
+		formulas[i] = domain.Formula{
+			Params:   []string{colName},
+			Field:    colName,
+			Operator: "", // Empty operator = pass-through
+			Position: i + 1,
+		}
+	}
+	return columns, formulas, nil
 }
 
 // GetColumnMetadata extracts column metadata from sql.Rows

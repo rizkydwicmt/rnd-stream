@@ -15,7 +15,7 @@ type Repository interface {
 	ExecuteCountQuery(ctx context.Context, query string, args ...interface{}) (int64, error)
 
 	// GetColumnNames extracts column names from sql.Rows
-	GetColumnNames(rows *sql.Rows) ([]string, error)
+	GetColumnNames(rows *sql.Rows) ([]string, []Formula, error)
 
 	// GetColumnMetadata extracts column metadata from sql.Rows
 	GetColumnMetadata(rows *sql.Rows) ([]ColumnMetadata, error)

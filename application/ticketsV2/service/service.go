@@ -78,13 +78,17 @@ func (s *service) StreamTickets(ctx context.Context, payload *domain.QueryPayloa
 	}
 
 	// Step 7: Get column names
-	columns, err := s.repo.GetColumnNames(rows)
+	columns, formulas, err := s.repo.GetColumnNames(rows)
 	if err != nil {
 		rows.Close()
 		return middleware.StreamResponse{
 			Code:  500,
 			Error: fmt.Errorf("failed to get column names: %w", err),
 		}
+	}
+
+	if sortedFormulas == nil || len(sortedFormulas) == 0 {
+		sortedFormulas = formulas
 	}
 
 	// Step 8: Create streamer with default configuration
@@ -169,13 +173,17 @@ func (s *service) StreamTicketsBatch(ctx context.Context, payload *domain.QueryP
 	}
 
 	// Step 7: Get column names
-	columns, err := s.repo.GetColumnNames(rows)
+	columns, formulas, err := s.repo.GetColumnNames(rows)
 	if err != nil {
 		rows.Close()
 		return middleware.StreamResponse{
 			Code:  500,
 			Error: fmt.Errorf("failed to get column names: %w", err),
 		}
+	}
+
+	if sortedFormulas == nil || len(sortedFormulas) == 0 {
+		sortedFormulas = formulas
 	}
 
 	// Step 8: Create streamer with default configuration
