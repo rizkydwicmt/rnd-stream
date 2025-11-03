@@ -106,7 +106,7 @@ jobs:
 #        run: go test -bench=. -benchmem -benchtime=100000x ./... | tee benchmark.txt
 #
 #      - name: Store benchmark result
-#        uses: actions/upload-artifact@v4
+#        uses: actions/upload-artifact@v5
 #        with:
 #          name: benchmark-results
 #          path: benchmark.txt
@@ -149,7 +149,7 @@ jobs:
         run: go build -v -ldflags="-s -w" -o bin/stream .
 
       - name: Upload build artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: stream-${{ matrix.os }}-go${{ matrix.go-version }}
           path: bin/
